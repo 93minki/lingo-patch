@@ -449,6 +449,8 @@ export function startPagePipeline() {
   const navigate = () => {
     if (pageUrl() !== href) {
       href = pageUrl();
+      // A manual toggle applies to one page; the next page follows the site setting.
+      enabled = Boolean(lastAuto);
       reset();
     }
   };

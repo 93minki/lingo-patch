@@ -226,6 +226,22 @@ test('SPA reset rejects stale results and reconnect scans again', async () => {
   history.replaceState({}, '', '/');
 });
 
+test('manual translation stops after navigating to another page', async () => {
+  dispose = startPagePipeline();
+  receive(mode(false));
+  await vi.advanceTimersByTimeAsync(10);
+  receive({ type: 'toggle', generation: messages.at(-1)?.generation ?? 0 });
+  await nextScan();
+  expect(messages.some((m) => m.type === 'lookup')).toBe(true);
+  const lookups = messages.filter((m) => m.type === 'lookup').length;
+  history.pushState({}, '', '/other-page');
+  window.dispatchEvent(new Event('popstate'));
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(messages.filter((m) => m.type === 'lookup')).toHaveLength(lookups);
+  expect(document.querySelector('lp-t')).toBeNull();
+  history.replaceState({}, '', '/');
+});
+
 test('hash-only URL changes keep rendered translations', async () => {
   dispose = startPagePipeline();
   receive(mode());
