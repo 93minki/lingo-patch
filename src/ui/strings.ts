@@ -31,6 +31,7 @@ export const strings = {
     statsTranslated: '새 번역',
     statsPending: '남음',
     statsSection: '페이지 통계',
+    settings: '설정',
     requestFailed: '요청에 실패했습니다',
     retry: '다시 시도',
   },

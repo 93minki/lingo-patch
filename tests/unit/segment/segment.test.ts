@@ -5,6 +5,7 @@ import {
   isLikelyLang,
   normalizeMarkup,
   serializeInline,
+  translationEqualsSource,
 } from '../../../src/core/segment';
 
 function root(html: string): Element {
@@ -141,6 +142,17 @@ describe('inline serialization and restoration', () => {
   });
   test('normalizes whitespace', () => {
     expect(normalizeMarkup('  Hello\n\t world  ')).toBe('Hello world');
+  });
+});
+
+describe('translationEqualsSource', () => {
+  test('ignores case, whitespace, and placeholder markup', () => {
+    expect(translationEqualsSource('Props', 'props')).toBe(true);
+    expect(translationEqualsSource('  React  ', 'react')).toBe(true);
+    expect(
+      translationEqualsSource('react-dom@19.3', 'react-dom@19.3'),
+    ).toBe(true);
+    expect(translationEqualsSource('Hello', 'Goodbye')).toBe(false);
   });
 });
 

@@ -1,17 +1,25 @@
 import { strings } from '../ui/strings';
-import { deserialize, findSegments, type Segment } from '../core/segment';
+import {
+  deserialize,
+  findSegments,
+  translationEqualsSource,
+  type Segment,
+} from '../core/segment';
 export interface RenderRecord {
   key: string;
   segment: Segment;
   node?: HTMLElement;
   fontSize: string;
+  lineHeight: string;
   abandoned: boolean;
   state?: 'pending' | 'ready' | 'error';
   text?: string;
 }
 export class SegmentRenderer {
   private marked = new Set<Element>();
+  private srcNodes = new Set<Element>();
   private fontSizes = new WeakMap<Element, string>();
+  private lineHeights = new WeakMap<Element, string>();
   private removals = new WeakMap<
     Element,
     { times: number[]; abandoned: boolean }
@@ -23,11 +31,17 @@ export class SegmentRenderer {
       style.fontSize === '0px'
         ? (this.fontSizes.get(segment.block) ?? '16px')
         : style.fontSize;
+    const lineHeight =
+      style.lineHeight === '0px'
+        ? (this.lineHeights.get(segment.block) ?? 'normal')
+        : style.lineHeight;
     this.fontSizes.set(segment.block, fontSize);
+    this.lineHeights.set(segment.block, lineHeight);
     return {
       key,
       segment,
       fontSize,
+      lineHeight,
       abandoned: this.removals.get(segment.block)?.abandoned ?? false,
     };
   }
@@ -49,6 +63,15 @@ export class SegmentRenderer {
     )
       return;
     this.remove(record);
+    if (
+      state === 'ready' &&
+      translationEqualsSource(text, record.segment.text)
+    ) {
+      record.node = undefined;
+      record.state = state;
+      record.text = text;
+      return;
+    }
     const node = this.doc.createElement('lp-t');
     node.dataset.lpKey = record.key;
     node.dataset.lpState = state;
@@ -60,19 +83,30 @@ export class SegmentRenderer {
       (style.display === 'flex' && style.flexDirection.startsWith('column'));
     node.dataset.lpDisplay = block ? 'block' : 'inline';
     node.style.setProperty('--lp-fs', record.fontSize || '16px');
-    if (state === 'ready')
-      node.append(
-        deserialize(text, record.segment.placeholders, this.doc).fragment,
+    node.style.setProperty('--lp-lh', record.lineHeight || 'normal');
+    if (state === 'ready') {
+      const { fragment } = deserialize(
+        text,
+        record.segment.placeholders,
+        this.doc,
       );
+      // Clones of marked source elements must stay visible inside the translation.
+      for (const clone of fragment.querySelectorAll('[data-lp-src]'))
+        clone.removeAttribute('data-lp-src');
+      node.append(fragment);
+    }
     if (state === 'error') {
       node.textContent = '⚠';
       node.title = strings.progress.partialFailure;
     }
     const { block: parent, anchor } = record.segment;
     parent.insertBefore(node, anchor?.parentNode === parent ? anchor : null);
-    if (state === 'ready' && !parent.hasAttribute('data-lp-src-hidden')) {
-      parent.setAttribute('data-lp-src-hidden', '');
-      this.marked.add(parent);
+    if (state === 'ready') {
+      if (!parent.hasAttribute('data-lp-src-hidden')) {
+        parent.setAttribute('data-lp-src-hidden', '');
+        this.marked.add(parent);
+      }
+      this.markSourceElements(record.segment);
     }
     record.node = node;
     record.state = state;
@@ -118,6 +152,7 @@ export class SegmentRenderer {
     this.render(record, record.state ?? 'pending', record.text);
   }
   remove(record: RenderRecord): void {
+    this.unmarkSourceElements(record.segment);
     record.node?.remove();
     const block = record.segment.block;
     if (
@@ -137,7 +172,22 @@ export class SegmentRenderer {
     for (const block of this.marked)
       block.removeAttribute('data-lp-src-hidden');
     this.marked.clear();
+    for (const node of this.srcNodes) node.removeAttribute('data-lp-src');
+    this.srcNodes.clear();
     this.removals = new WeakMap();
     this.fontSizes = new WeakMap();
+    this.lineHeights = new WeakMap();
+  }
+  private markSourceElements(segment: Segment): void {
+    for (const placeholder of segment.placeholders) {
+      placeholder.node.setAttribute('data-lp-src', '');
+      this.srcNodes.add(placeholder.node);
+    }
+  }
+  private unmarkSourceElements(segment: Segment): void {
+    for (const placeholder of segment.placeholders) {
+      placeholder.node.removeAttribute('data-lp-src');
+      this.srcNodes.delete(placeholder.node);
+    }
   }
 }

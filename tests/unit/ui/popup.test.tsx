@@ -40,6 +40,7 @@ const status = (patch: Partial<TabStatus> = {}): TabStatus => ({
 function mount(
   uiRequest: (request: UiRequest) => Promise<UiResponse>,
   confirm = vi.fn(() => true),
+  openOptionsPage = vi.fn(),
 ) {
   const root = document.createElement('div');
   document.body.appendChild(root);
@@ -49,11 +50,12 @@ function mount(
         queryActiveTab: async () => ({ id: 7 }),
         uiRequest,
         confirm,
+        openOptionsPage,
       }}
     />,
     root,
   );
-  return root;
+  return { root, openOptionsPage };
 }
 
 beforeEach(() => {
@@ -83,7 +85,7 @@ test('shows unavailable guidance on internal pages', async () => {
     ok: true,
     status: status({ available: false, hostname: 'chrome' }),
   }));
-  const root = mount(uiRequest);
+  const { root } = mount(uiRequest);
   await waitReady(root);
   expect(root.textContent).toContain(strings.popup.unavailable);
 });
@@ -93,7 +95,7 @@ test('prefers unavailable over unconfigured when both apply', async () => {
     ok: true,
     status: status({ available: false, configured: false }),
   }));
-  const root = mount(uiRequest);
+  const { root } = mount(uiRequest);
   await waitReady(root);
   expect(root.textContent).toContain(strings.popup.unavailable);
   expect(root.textContent).not.toContain(strings.popup.configure);
@@ -113,7 +115,14 @@ test('shows retry UI when the active tab query fails', async () => {
   const root = document.createElement('div');
   document.body.appendChild(root);
   render(
-    <PopupApp deps={{ queryActiveTab, uiRequest, confirm: vi.fn(() => true) }} />,
+    <PopupApp
+      deps={{
+        queryActiveTab,
+        uiRequest,
+        confirm: vi.fn(() => true),
+        openOptionsPage: vi.fn(),
+      }}
+    />,
     root,
   );
   await vi.waitFor(() =>
@@ -135,6 +144,7 @@ test('shows unavailable when no active tab is returned', async () => {
         queryActiveTab: async () => undefined,
         uiRequest,
         confirm: vi.fn(() => true),
+        openOptionsPage: vi.fn(),
       }}
     />,
     root,
@@ -149,7 +159,7 @@ test('shows only configure action when provider is missing', async () => {
     ok: true,
     status: status({ configured: false, available: true }),
   }));
-  const root = mount(uiRequest);
+  const { root } = mount(uiRequest);
   await waitReady(root);
   expect(root.querySelector('button')?.textContent).toBe(
     strings.popup.configure,
@@ -171,7 +181,7 @@ test('toggles auto translate and polls tab status every 500ms', async () => {
       return { ok: true, status: status({ autoEnabled: true }) };
     return { ok: false, error: 'bad_request' as const };
   });
-  const root = mount(uiRequest);
+  const { root } = mount(uiRequest);
   await waitReady(root);
   const initialCalls = uiRequest.mock.calls.length;
   await vi.advanceTimersByTimeAsync(500);
@@ -196,7 +206,7 @@ test('asks once before retranslate and sends the page request', async () => {
     if (request.type === 'retranslatePage') return { ok: true };
     return { ok: false, error: 'bad_request' as const };
   });
-  const root = mount(uiRequest, confirm);
+  const { root } = mount(uiRequest, confirm);
   await waitReady(root);
   const button = [...root.querySelectorAll('button')].find(
     (node) => node.textContent === strings.popup.retranslate,
@@ -216,11 +226,27 @@ test('renders four page stats from tab status', async () => {
     ok: true,
     status: status(),
   }));
-  const root = mount(uiRequest);
+  const { root } = mount(uiRequest);
   await waitReady(root);
   expect(root.textContent).toContain('12');
   expect(root.textContent).toContain(strings.popup.statsRestored);
   expect(root.textContent).toContain('4');
   expect(root.textContent).toContain('3');
   expect(root.textContent).toContain('2');
+});
+
+test('always shows a settings link that opens the options page', async () => {
+  const openOptionsPage = vi.fn();
+  const uiRequest = vi.fn(async () => ({
+    ok: true,
+    status: status({ configured: false }),
+  }));
+  const { root } = mount(uiRequest, vi.fn(() => true), openOptionsPage);
+  await waitReady(root);
+  const settings = [...root.querySelectorAll('button')].find(
+    (node) => node.textContent === strings.popup.settings,
+  );
+  expect(settings).toBeTruthy();
+  settings?.click();
+  expect(openOptionsPage).toHaveBeenCalledOnce();
 });

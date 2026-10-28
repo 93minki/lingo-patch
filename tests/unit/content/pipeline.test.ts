@@ -135,6 +135,24 @@ test('waits for enable, looks up first, requests only nearby misses and toggles 
     messages.filter((m) => m.type === 'translate' || m.type === 'lookup'),
   ).toHaveLength(count);
 });
+test('identical translations skip lp-t but still count as translated', async () => {
+  dispose = startPagePipeline();
+  receive(mode());
+  await nextScan();
+  const generation = messages.at(-1)!.generation;
+  inView();
+  receive({
+    type: 'translated',
+    key: 'Source paragraph',
+    text: 'Source paragraph',
+    generation,
+  });
+  expect(document.querySelector('lp-t')).toBeNull();
+  expect(messages.filter((m) => m.type === 'status').at(-1)).toMatchObject({
+    translated: 1,
+    restored: 0,
+  });
+});
 test('cache restoration and removed-node repair make no translation request; source additions debounce', async () => {
   dispose = startPagePipeline();
   receive(mode());

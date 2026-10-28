@@ -33,8 +33,13 @@ test('TRANSLATION_CSS defines base, display, mode, and state rules', () => {
   expect(TRANSLATION_CSS).toContain(
     'html[data-lp-mode="translation"] [data-lp-src-hidden]',
   );
-  expect(TRANSLATION_CSS).toContain('font-size: 0');
-  expect(TRANSLATION_CSS).toContain('font-size: var(--lp-fs)');
+  expect(TRANSLATION_CSS).toContain('line-height: 0 !important');
+  expect(TRANSLATION_CSS).toContain('[data-lp-src-hidden] > [data-lp-src]');
+  expect(TRANSLATION_CSS).toContain('display: none !important');
+  expect(TRANSLATION_CSS).toContain('[data-lp-src-hidden] > lp-t');
+  expect(TRANSLATION_CSS).toContain('line-height: var(--lp-lh) !important');
+  expect(TRANSLATION_CSS).toContain('margin-top: 0 !important');
+  expect(TRANSLATION_CSS).toContain('li[data-lp-src-hidden]::marker');
   expect(TRANSLATION_CSS).toContain('lp-t[data-lp-state="error"]');
   expect(TRANSLATION_CSS).toContain('lp-t[data-lp-state="pending"]');
 });
@@ -59,12 +64,15 @@ test('translation mode hides source text via font-size while restoring lp-t size
   block.textContent = '원문';
   const lp = document.createElement('lp-t');
   lp.style.setProperty('--lp-fs', '20px');
+  lp.style.setProperty('--lp-lh', '24px');
   lp.textContent = '번역';
   block.appendChild(lp);
   document.body.appendChild(block);
   ensureStyle(document);
   expect(getComputedStyle(block).fontSize).toBe('0px');
+  expect(getComputedStyle(block).lineHeight).toBe('0');
   expect(getComputedStyle(lp).fontSize).toBe('20px');
+  expect(getComputedStyle(lp).lineHeight).toBe('24px');
 });
 
 test('pending and error lp-t states follow layout rules', () => {

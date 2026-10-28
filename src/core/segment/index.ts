@@ -94,6 +94,16 @@ function translatableText(markup: string): string {
   return decodeText(markup.replace(placeholderStrip, ''));
 }
 
+export function translationEqualsSource(
+  translatedMarkup: string,
+  sourceText: string,
+): boolean {
+  return (
+    normalizeMarkup(translatableText(translatedMarkup)).toLowerCase() ===
+    normalizeMarkup(sourceText).toLowerCase()
+  );
+}
+
 export function serializeInline(nodes: Node[]): {
   markup: string;
   text: string;

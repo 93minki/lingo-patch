@@ -15,6 +15,7 @@ export type PopupDeps = {
   queryActiveTab: () => Promise<{ id: number } | undefined>;
   uiRequest: (request: UiRequest) => Promise<UiResponse>;
   confirm: (message: string) => boolean;
+  openOptionsPage: () => void | Promise<void>;
 };
 
 const POLL_MS = 500;
@@ -42,6 +43,27 @@ function unavailableStatus(hostname = ''): TabStatus {
     translated: 0,
     pending: 0,
   };
+}
+
+function PopupSettingsLink({
+  busy,
+  onOpen,
+}: {
+  busy: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <p class="popup__footer">
+      <button
+        type="button"
+        class="popup__btn popup__btn--link"
+        disabled={busy}
+        onClick={onOpen}
+      >
+        {strings.popup.settings}
+      </button>
+    </p>
+  );
 }
 
 export function PopupApp({ deps }: { deps: PopupDeps }) {
@@ -130,6 +152,8 @@ export function PopupApp({ deps }: { deps: PopupDeps }) {
     }
   };
 
+  const openSettings = () => void deps.openOptionsPage();
+
   const openOptions = () =>
     void run(async () => {
       const response = await deps.uiRequest({ type: 'openOptions' });
@@ -149,6 +173,7 @@ export function PopupApp({ deps }: { deps: PopupDeps }) {
         >
           {strings.popup.retry}
         </button>
+        <PopupSettingsLink busy={false} onOpen={openSettings} />
       </main>
     );
   }
@@ -158,6 +183,7 @@ export function PopupApp({ deps }: { deps: PopupDeps }) {
       <main class="popup" aria-busy="true">
         <h1 class="popup__title">{strings.popup.title}</h1>
         <p class="popup__message">{strings.popup.loading}</p>
+        <PopupSettingsLink busy={false} onOpen={openSettings} />
       </main>
     );
   }
@@ -168,6 +194,7 @@ export function PopupApp({ deps }: { deps: PopupDeps }) {
         <h1 class="popup__title">{strings.popup.title}</h1>
         <p class="popup__host">{status.hostname || '—'}</p>
         <p class="popup__message">{strings.popup.unavailable}</p>
+        <PopupSettingsLink busy={busy} onOpen={openSettings} />
       </main>
     );
   }
@@ -187,6 +214,7 @@ export function PopupApp({ deps }: { deps: PopupDeps }) {
         >
           {strings.popup.configure}
         </button>
+        <PopupSettingsLink busy={busy} onOpen={openSettings} />
       </main>
     );
   }
@@ -319,6 +347,7 @@ export function PopupApp({ deps }: { deps: PopupDeps }) {
           <span class="popup__stat-label">{strings.popup.statsPending}</span>
         </div>
       </section>
+      <PopupSettingsLink busy={busy} onOpen={openSettings} />
     </main>
   );
 }
@@ -337,6 +366,7 @@ if (appRoot && !import.meta.env.VITEST) {
         },
         uiRequest,
         confirm: (message) => window.confirm(message),
+        openOptionsPage: () => browser.runtime.openOptionsPage(),
       }}
     />,
     appRoot,

@@ -27,6 +27,9 @@ test('renders with cloned inline nodes while preserving every source text and at
   expect(record.node!.textContent).toBe('여기에서 map을 사용하세요.');
   expect(record.node!.dataset.lpDisplay).toBe('block');
   expect(record.node!.style.getPropertyValue('--lp-fs')).toBe('22px');
+  expect(record.node!.style.getPropertyValue('--lp-lh')).not.toBe('');
+  expect(code.hasAttribute('data-lp-src')).toBe(true);
+  expect(anchor.hasAttribute('data-lp-src')).toBe(true);
   expect(block.querySelector('code')).toBe(code);
   expect(block.querySelector('a')).toBe(anchor);
   expect(
@@ -42,6 +45,8 @@ test('renders with cloned inline nodes while preserving every source text and at
   renderer.render(record, 'ready', '<g1>여기</g1>에서 <x0/>을 사용하세요.');
   expect(block.querySelectorAll('lp-t')).toHaveLength(1);
   renderer.clear([record]);
+  expect(code.hasAttribute('data-lp-src')).toBe(false);
+  expect(anchor.hasAttribute('data-lp-src')).toBe(false);
   expect(block.outerHTML).toBe(
     '<p class="source" style="font-size:22px">Use <code>map</code> <a href="#top">here</a>.</p>',
   );
@@ -102,6 +107,14 @@ test('does not restore a stale translation after source text changed', () => {
   renderer.restore(record);
   expect(block.querySelector('lp-t')).toBeNull();
 });
+test('skips lp-t when translation matches source text', () => {
+  const { renderer, record, block } = setup('<p>Props stay</p>');
+  renderer.render(record, 'ready', 'Props stay');
+  expect(block.querySelector('lp-t')).toBeNull();
+  expect(block.hasAttribute('data-lp-src-hidden')).toBe(false);
+  renderer.render(record, 'ready', 'PROPS   stay');
+  expect(block.querySelector('lp-t')).toBeNull();
+});
 test('ready-to-error and removal release only our source hiding marker', () => {
   const { renderer, record, block } = setup();
   renderer.render(record, 'ready', '번역문');
@@ -140,4 +153,28 @@ test('uses current atomic source after page rerenders the same markup', () => {
   block.querySelector('code')!.replaceWith(replacement);
   renderer.restore(record);
   expect(record.node!.querySelector('code')!.textContent).toBe('newIdentifier');
+});
+test('re-rendered translations keep cloned inline nodes visible in translation-only mode', () => {
+  const { renderer, record } = setup();
+  renderer.render(record, 'ready', '<g1>여기</g1>에서 <x0/>을 사용하세요.');
+  renderer.render(record, 'ready', '<g1>여기</g1>에서 <x0/>을 사용하세요!');
+  expect(record.node!.querySelectorAll('[data-lp-src]')).toHaveLength(0);
+  expect(record.node!.querySelector('code')!.textContent).toBe('map');
+});
+test('marks source inline nodes of every segment sharing a block', () => {
+  document.body.innerHTML =
+    '<li>Use <code>a</code> first<ul><li>Nested paragraph</li></ul>Then <em>second</em> part</li>';
+  const renderer = new SegmentRenderer(document);
+  const block = document.querySelector('li')!;
+  const records = findSegments(document.body)
+    .filter((segment) => segment.block === block)
+    .map((segment, index) => renderer.create(String(index), segment));
+  expect(records).toHaveLength(2);
+  for (const record of records) renderer.render(record, 'ready', '번역문');
+  expect(
+    block.querySelector(':scope > code')!.hasAttribute('data-lp-src'),
+  ).toBe(true);
+  expect(block.querySelector(':scope > em')!.hasAttribute('data-lp-src')).toBe(
+    true,
+  );
 });

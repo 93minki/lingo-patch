@@ -17,10 +17,19 @@ html[data-lp-mode="original"] lp-t {
   display: none !important;
 }
 html[data-lp-mode="translation"] [data-lp-src-hidden] {
-  font-size: 0;
+  font-size: 0 !important;
+  line-height: 0 !important;
 }
-html[data-lp-mode="translation"] [data-lp-src-hidden] lp-t {
-  font-size: var(--lp-fs);
+html[data-lp-mode="translation"] [data-lp-src-hidden] > [data-lp-src] {
+  display: none !important;
+}
+html[data-lp-mode="translation"] [data-lp-src-hidden] > lp-t {
+  font-size: var(--lp-fs) !important;
+  line-height: var(--lp-lh) !important;
+  margin-top: 0 !important;
+}
+html[data-lp-mode="translation"] li[data-lp-src-hidden]::marker {
+  font-size: 1rem;
 }
 lp-t[data-lp-state="error"] {
   font-size: 0.85em;
