@@ -518,6 +518,27 @@ test('options and popup controls use the real background API without exposing ke
     );
     for (const scheme of ['light', 'dark'] as const) {
       await popup.emulateMedia({ colorScheme: scheme });
+      const toggleLayout = await popup
+        .locator('.popup__toggle')
+        .evaluate((label) => {
+          const input = label.querySelector('input')!;
+          const text = [...label.childNodes].find(
+            (node) =>
+              node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
+          )!;
+          const range = document.createRange();
+          range.selectNodeContents(text);
+          const rects = range.getClientRects();
+          return {
+            lines: rects.length,
+            inputRight: input.getBoundingClientRect().right,
+            textLeft: rects[0]!.left,
+            inputWidth: input.getBoundingClientRect().width,
+          };
+        });
+      expect(toggleLayout.lines).toBe(1);
+      expect(toggleLayout.inputRight).toBeLessThan(toggleLayout.textLeft);
+      expect(toggleLayout.inputWidth).toBeLessThan(30);
       await popup.screenshot({
         path: `.output/ui-popup-main-${scheme}.png`,
         fullPage: true,
@@ -624,6 +645,14 @@ test('Next.js sticky header is skipped and short sidebar labels render compact',
     const page = context.pages()[0] ?? (await context.newPage());
     await page.goto(`${origin}/nextjs`);
     const header = page.locator('header').first();
+    const sidebarItem = page
+      .locator('aside a')
+      .filter({ hasText: /^Installation$/ })
+      .first()
+      .locator('xpath=ancestor::li[1]');
+    const sidebarHeight = await sidebarItem.evaluate(
+      (element) => element.getBoundingClientRect().height,
+    );
     const before = await header.evaluate(
       (element) => element.getBoundingClientRect().height,
     );
@@ -639,6 +668,14 @@ test('Next.js sticky header is skipped and short sidebar labels render compact',
     await expect(
       page.locator('aside lp-t[data-lp-display="compact"]').first(),
     ).toBeVisible();
+    await expect(
+      sidebarItem.locator('lp-t[data-lp-display="compact"]'),
+    ).toBeVisible();
+    expect(
+      await sidebarItem.evaluate(
+        (element) => element.getBoundingClientRect().height,
+      ),
+    ).toBe(sidebarHeight);
     const tooNarrow = await page
       .locator('lp-t[data-lp-state="ready"]')
       .evaluateAll(

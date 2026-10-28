@@ -65,7 +65,7 @@ const server = createServer(async (req, res) => {
         new URL('../fixtures/nextjs-docs.html', import.meta.url),
         'utf8',
       );
-      const css = `<style>body{margin:0;font:16px/20px system-ui} header{position:sticky;top:0;min-height:64px;background:white;display:flex;align-items:center;z-index:10} header>div>div{display:flex;align-items:center;gap:8px} header>div>div>div{display:flex;align-items:center} header [class*=fixed]{display:none} header nav{display:flex;height:40px;overflow:hidden} header img{max-height:32px;width:auto} header a{display:inline-flex;align-items:center;gap:8px} svg{display:none} aside{width:300px} aside a{display:block;line-height:20px} img{max-width:120px}</style>`;
+      const css = `<style>body{margin:0;font:16px/20px system-ui} header{position:sticky;top:0;min-height:64px;background:white;display:flex;align-items:center;z-index:10} header>div>div{display:flex;align-items:center;gap:8px} header>div>div>div{display:flex;align-items:center} header [class*=fixed]{display:none} header nav{display:flex;height:40px;overflow:hidden} header img{max-height:32px;width:auto} header a{display:inline-flex;align-items:center;gap:8px} svg{display:none} aside{width:300px} aside li>div{display:flex;align-items:center} aside a{display:flex;flex:1;line-height:20px} img{max-width:120px}</style>`;
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       return res.end(html.replace('</head>', `${css}</head>`));
     }

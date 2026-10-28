@@ -58,6 +58,16 @@ test.each(fixtures)(
     const before = document.body.innerHTML;
     const start = performance.now();
     const segments = findSegments(document.body);
+    if (name === 'nextjs-docs') {
+      const sidebar = document.querySelector('aside')!;
+      for (const text of ['Installation', 'Project Structure', 'Caching'])
+        expect(
+          segments.some(
+            (segment) =>
+              sidebar.contains(segment.block) && segment.text.trim() === text,
+          ),
+        ).toBe(true);
+    }
     const elapsed = performance.now() - start;
     console.log(
       JSON.stringify({

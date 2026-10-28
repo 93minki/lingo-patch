@@ -138,9 +138,16 @@ export function findSegments(
     )
       return 2;
     const generic =
-      element.matches('div,section,article,span') &&
+      (element.matches('div,section,article,span') ||
+        (parentBlock && element.matches(boundarySelector))) &&
       Array.from(element.childNodes).some(
-        (node) => node.nodeType === 3 && node.textContent?.trim(),
+        (node) =>
+          (node.nodeType === 3 && node.textContent?.trim()) ||
+          (parentBlock &&
+            element.matches(boundarySelector) &&
+            node.nodeType === 1 &&
+            isPaired(node as Element, boundarySelector) &&
+            node.textContent?.trim()),
       ) &&
       (element.localName !== 'span' || !parentBlock);
     if (element.matches(includeSelector) || generic) {

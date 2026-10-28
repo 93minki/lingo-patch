@@ -149,14 +149,28 @@ describe('translationEqualsSource', () => {
   test('ignores case, whitespace, and placeholder markup', () => {
     expect(translationEqualsSource('Props', 'props')).toBe(true);
     expect(translationEqualsSource('  React  ', 'react')).toBe(true);
-    expect(
-      translationEqualsSource('react-dom@19.3', 'react-dom@19.3'),
-    ).toBe(true);
+    expect(translationEqualsSource('react-dom@19.3', 'react-dom@19.3')).toBe(
+      true,
+    );
     expect(translationEqualsSource('Hello', 'Goodbye')).toBe(false);
   });
 });
 
 describe('block selection', () => {
+  test('finds inline content inside nested boundary blocks without duplication', () => {
+    const element = root(
+      '<ul><li><div><a href="/installation"><span><span>Installation</span></span></a></div><section><em>Other text</em></section></li></ul>',
+    );
+    const segments = findSegments(element);
+    expect(segments.map((segment) => segment.text)).toEqual([
+      'Installation',
+      'Other text',
+    ]);
+    expect(segments.map((segment) => segment.block.localName)).toEqual([
+      'div',
+      'section',
+    ]);
+  });
   test('skips pre blocks and atomic-only paragraphs, preserves inline code with text', () => {
     const element = root(
       '<pre><code>ignored</code></pre><p><code>onlyCode</code></p><p>Use <code>inlineCode</code> here.</p>',

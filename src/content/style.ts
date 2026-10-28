@@ -18,6 +18,9 @@ lp-t[data-lp-display="compact"] {
   margin-left: 0.5em;
   white-space: nowrap;
 }
+lp-t[data-lp-display="compact"] :is(a, span) {
+  display: inline;
+}
 lp-t[data-lp-layout="horizontal"][data-lp-display="compact"] {
   flex: none;
 }

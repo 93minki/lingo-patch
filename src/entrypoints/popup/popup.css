@@ -169,7 +169,7 @@ body {
   min-width: 0;
 }
 
-.popup input,
+.popup input:not([type='checkbox']):not([type='radio']),
 .popup select,
 .popup textarea {
   box-sizing: border-box;
@@ -182,13 +182,19 @@ body {
   font: inherit;
 }
 
+.popup input[type='checkbox'],
+.popup input[type='radio'] {
+  margin: 0;
+  flex: none;
+}
+
 .popup input::placeholder,
 .popup textarea::placeholder {
   color: var(--lp-placeholder);
   opacity: 1;
 }
 
-.popup input:disabled,
+.popup input:disabled:not([type='checkbox']):not([type='radio']),
 .popup select:disabled,
 .popup textarea:disabled {
   background: var(--lp-disabled-bg);
@@ -337,6 +343,7 @@ body {
   gap: 8px;
   margin-bottom: 10px;
   font-size: 13px;
+  cursor: pointer;
 }
 
 .popup button {
