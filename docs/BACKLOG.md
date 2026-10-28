@@ -12,3 +12,4 @@
 | P7 | Next.js 사이드바처럼 원문 칸이 `flex:1; truncate`면 번역문이 오른쪽 끝에 붙고 원문이 잘림 | 실사용 판단 |
 | P7 | Firefox·Whale 실기 검증 (이 Mac에 미설치), Safari 실기 검증 | 수동 |
 | P7 | `scan-block.ts`의 블록 판정 규칙이 `core/segment`와 중복 정의됨 — 한쪽만 바뀌면 어긋날 수 있음 | 하 |
+| 릴리스 | `package.json` 버전을 0.0.0 → 0.1.0으로 올리면 E2E "options and popup controls…" 테스트가 2분 시간 초과로 실패 (0.0.0이면 통과). 원인 미확인 — 테스트 중 권한 요청 창(`permissions.request`)에서 멈추는 것으로 추정 | 상 |

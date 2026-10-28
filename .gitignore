@@ -5,3 +5,4 @@ dist/
 coverage/
 *.zip
 *.tsbuildinfo
+.DS_Store

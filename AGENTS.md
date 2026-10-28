@@ -2,7 +2,7 @@
 
 AI로 웹 페이지를 이중 언어로 번역하고, 문단 단위 캐시로 재방문 시 API 호출 없이 복원하는 크로스 브라우저 확장(WXT + TypeScript).
 
-상세 설계는 `docs/DESIGN.md`를 따른다. 단계별 지시는 `docs/tasks/P0.md` 등 `docs/tasks/`를 참고한다.
+상세 설계는 `docs/DESIGN.md`, 설치는 `docs/INSTALL.md`, 남은 과제는 `docs/BACKLOG.md`를 따른다.
 
 구현 전에 `docs/DESIGN.md` **§3 기술 스택**, **§10 디렉터리**, **§11 단계 계획**, **§12 작업 프로세스**를 읽는다.
 
@@ -31,7 +31,6 @@ lingo-patch/
 │  ├─ messaging/
 │  ├─ platform/
 │  └─ ui/
-├─ site-rules/
 └─ tests/
    ├─ unit/
    ├─ fixtures/

@@ -298,7 +298,6 @@ lingo-patch/
 │  ├─ messaging/            # 메시지 타입 정의 + 헬퍼
 │  ├─ platform/             # 브라우저 차이 흡수
 │  └─ ui/                   # 팝업/옵션 공용 컴포넌트
-├─ site-rules/              # 문서 사이트별 기본 선택자 규칙(JSON)
 └─ tests/
    ├─ unit/
    ├─ fixtures/             # 실제 문서 사이트 HTML 스냅샷
