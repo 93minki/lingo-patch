@@ -1,0 +1,11 @@
+node_modules/
+.output/
+.wxt/
+.npm-cache/
+.tmp/
+.cache/
+dist/
+coverage/
+docs/DESIGN.md
+docs/tasks/
+package-lock.json
