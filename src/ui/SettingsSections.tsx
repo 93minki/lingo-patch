@@ -656,6 +656,7 @@ export function SettingsSections({
   return (
     <>
       <section
+        id={compact ? undefined : 'engine'}
         class={compact ? 'lp-settings-section' : undefined}
         aria-label={strings.options.engine}
       >

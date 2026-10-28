@@ -78,6 +78,45 @@ export function showsOnboarding(provider: Settings['provider']): boolean {
   return provider === null;
 }
 
+export const OPTIONS_SECTION_IDS = [
+  'engine',
+  'glossary',
+  'sites',
+  'cache',
+  'shortcuts',
+] as const;
+
+export type OptionsSectionId = (typeof OPTIONS_SECTION_IDS)[number];
+
+export function parseOptionsSectionHash(
+  hash: string,
+): OptionsSectionId | undefined {
+  const id = hash.startsWith('#') ? hash.slice(1) : hash;
+  return OPTIONS_SECTION_IDS.includes(id as OptionsSectionId)
+    ? (id as OptionsSectionId)
+    : undefined;
+}
+
+export function scrollToOptionsSection(
+  hash: string,
+  root: ParentNode = document,
+): boolean {
+  const id = parseOptionsSectionHash(hash);
+  if (!id) return false;
+  const target = root.querySelector(`#${CSS.escape(id)}`);
+  if (!(target instanceof HTMLElement)) return false;
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  return true;
+}
+
+const OPTIONS_TOC: { id: OptionsSectionId; label: string }[] = [
+  { id: 'engine', label: strings.options.engine },
+  { id: 'glossary', label: '용어집' },
+  { id: 'sites', label: strings.options.autoSites },
+  { id: 'cache', label: strings.options.cache },
+  { id: 'shortcuts', label: strings.options.shortcuts },
+];
+
 export type OptionsDeps = {
   uiRequest: (request: UiRequest) => Promise<UiResponse>;
   getSettings: typeof getSettings;
@@ -107,6 +146,7 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
   const [error, setError] = useState<string | undefined>();
   const [loadError, setLoadError] = useState<string | undefined>();
   const [retryToken, setRetryToken] = useState(0);
+  const [contentReady, setContentReady] = useState(false);
 
   const refreshCacheUsage = async () => {
     const response = await deps.uiRequest({ type: 'cacheUsage' });
@@ -141,6 +181,27 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
       stop();
     };
   }, [deps, retryToken]);
+
+  useEffect(() => {
+    if (!settings) {
+      setContentReady(false);
+      return;
+    }
+    setContentReady(true);
+  }, [settings]);
+
+  useEffect(() => {
+    if (!contentReady) return;
+    const scrollToHash = () => {
+      if (!window.location.hash) return;
+      requestAnimationFrame(() => {
+        scrollToOptionsSection(window.location.hash);
+      });
+    };
+    scrollToHash();
+    window.addEventListener('hashchange', scrollToHash);
+    return () => window.removeEventListener('hashchange', scrollToHash);
+  }, [contentReady]);
 
   const cachePercent = useMemo(() => {
     if (!settings || !usage) return 0;
@@ -191,6 +252,16 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
       <h1>{strings.options.title}</h1>
       {error ? <p class="options__error">{error}</p> : null}
       {message ? <p class="options__success">{message}</p> : null}
+
+      <nav class="options__toc" aria-label="설정 목차">
+        <ul>
+          {OPTIONS_TOC.map((item) => (
+            <li>
+              <a href={`#${item.id}`}>{item.label}</a>
+            </li>
+          ))}
+        </ul>
+      </nav>
 
       {showsOnboarding(settings.provider) ? (
         <section
@@ -266,7 +337,7 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
         setMessage={setMessage}
       />
 
-      <section aria-label={strings.options.autoSites}>
+      <section id="sites" aria-label={strings.options.autoSites}>
         <h2>{strings.options.autoSites}</h2>
         <ul class="options__site-list">
           {settings.autoSites.map((site) => (
@@ -322,7 +393,7 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
         </div>
       </section>
 
-      <section aria-label={strings.options.cache}>
+      <section id="cache" aria-label={strings.options.cache}>
         <h2>{strings.options.cache}</h2>
         <CacheTransfer
           uiRequest={deps.uiRequest}
@@ -520,7 +591,7 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
         </button>
       </section>
 
-      <section aria-label={strings.options.shortcuts}>
+      <section id="shortcuts" aria-label={strings.options.shortcuts}>
         <h2>{strings.options.shortcuts}</h2>
         <p class="options__hint">{strings.options.shortcutsHint}</p>
         <ul>

@@ -92,18 +92,21 @@ function inView() {
   ]);
 }
 test('hover requests only with configured modifier even when page translation is off', async () => {
+  document.body.innerHTML =
+    '<p>Source paragraph</p><ul><li><div><a><span>Sidebar text</span></a></div></li></ul><input>';
   dispose = startPagePipeline();
   receive(mode(false));
   await nextScan();
   const paragraph = document.querySelector('p')!;
+  const sidebar = document.querySelector('span')!;
   messages = [];
-  paragraph.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  paragraph.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
   await Promise.resolve();
   expect(messages.filter((message) => message.type === 'lookup')).toHaveLength(
     0,
   );
-  paragraph.dispatchEvent(
-    new MouseEvent('mouseover', { bubbles: true, altKey: true }),
+  document.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Alt', altKey: true, bubbles: true }),
   );
   await Promise.resolve();
   const lookup = messages.find((message) => message.type === 'lookup')!;
@@ -125,9 +128,95 @@ test('hover requests only with configured modifier even when page translation is
   });
   expect(paragraph.querySelector('lp-t')?.textContent).toBe('번역문');
   paragraph.dispatchEvent(
-    new MouseEvent('mouseover', { bubbles: true, altKey: true }),
+    new MouseEvent('mousemove', { bubbles: true, altKey: true }),
+  );
+  await vi.advanceTimersByTimeAsync(20);
+  expect(paragraph.querySelector('lp-t')).not.toBeNull();
+  sidebar.dispatchEvent(
+    new MouseEvent('mousemove', { bubbles: true, altKey: true }),
+  );
+  await vi.advanceTimersByTimeAsync(20);
+  expect(
+    messages.filter((message) => message.type === 'lookup').at(-1),
+  ).toMatchObject({ keys: ['<g0><g1>Sidebar text</g1></g0>'] });
+  document.dispatchEvent(
+    new KeyboardEvent('keyup', { key: 'Alt', bubbles: true }),
+  );
+  paragraph.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+  document.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Alt', altKey: true, bubbles: true }),
   );
   expect(paragraph.querySelector('lp-t')).toBeNull();
+  document.dispatchEvent(
+    new KeyboardEvent('keyup', { key: 'Alt', bubbles: true }),
+  );
+  (document.querySelector('input') as HTMLInputElement).focus();
+  const count = messages.filter((message) => message.type === 'lookup').length;
+  document.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Alt', altKey: true, bubbles: true }),
+  );
+  await Promise.resolve();
+  expect(messages.filter((message) => message.type === 'lookup')).toHaveLength(
+    count,
+  );
+});
+
+test('hover without provider reports that configuration is required', async () => {
+  dispose = startPagePipeline();
+  receive({ ...mode(false), configured: false });
+  await nextScan();
+  document
+    .querySelector('p')!
+    .dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+  document.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Alt', altKey: true, bubbles: true }),
+  );
+  expect(
+    document.querySelector('lp-progress')!.shadowRoot!.textContent,
+  ).toContain('번역 설정이 필요합니다');
+  expect(
+    messages.filter((message) => message.type === 'translate'),
+  ).toHaveLength(0);
+});
+
+test('configured Control modifier works and off disables hover', async () => {
+  dispose = startPagePipeline();
+  receive({ ...mode(false), hoverModifier: 'control' });
+  await nextScan();
+  document
+    .querySelector('p')!
+    .dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+  document.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Alt', altKey: true, bubbles: true }),
+  );
+  expect(messages.filter((message) => message.type === 'lookup')).toHaveLength(
+    0,
+  );
+  document.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'Control',
+      ctrlKey: true,
+      bubbles: true,
+    }),
+  );
+  await Promise.resolve();
+  expect(messages.filter((message) => message.type === 'lookup')).toHaveLength(
+    1,
+  );
+  document.dispatchEvent(
+    new KeyboardEvent('keyup', { key: 'Control', bubbles: true }),
+  );
+  receive({ ...mode(false), hoverModifier: 'off' });
+  document.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'Control',
+      ctrlKey: true,
+      bubbles: true,
+    }),
+  );
+  expect(messages.filter((message) => message.type === 'lookup')).toHaveLength(
+    1,
+  );
 });
 
 test('selection button ignores input and disabled setting, closes on escape', async () => {

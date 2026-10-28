@@ -116,6 +116,10 @@ test('persistent paragraph cache, original DOM, lazy requests and keyboard modes
       `.output/${browser}-mv3/manifest.json`,
       'utf8',
     );
+    expect(JSON.parse(manifest).options_ui).toMatchObject({
+      page: 'options.html',
+      open_in_tab: true,
+    });
     expect(manifest).not.toContain('127.0.0.1');
     expect(
       await readFile(`.output/${browser}-mv3/background.js`, 'utf8'),
@@ -543,6 +547,10 @@ test('options and popup controls use the real background API without exposing ke
     for (const scheme of ['light', 'dark'] as const) {
       await options.emulateMedia({ colorScheme: scheme });
       await options.screenshot({
+        path: `.output/p6-options-tab-${scheme}.png`,
+        fullPage: true,
+      });
+      await options.screenshot({
         path: `.output/ui-options-${scheme}.png`,
         fullPage: true,
       });
@@ -556,6 +564,15 @@ test('options and popup controls use the real background API without exposing ke
       ])
         expect(await contrast(options, selector)).toBeGreaterThanOrEqual(4.5);
     }
+    await options.goto(`${root}/options.html#cache`);
+    await expect
+      .poll(async () =>
+        options
+          .locator('#cache')
+          .evaluate((element) => Math.abs(element.getBoundingClientRect().top)),
+      )
+      .toBeLessThan(60);
+    await options.goto(`${root}/options.html`);
     await options.emulateMedia({ colorScheme: 'light' });
     await options
       .getByRole('combobox', { name: '번역 엔진', exact: true })
@@ -592,8 +609,14 @@ test('options and popup controls use the real background API without exposing ke
     const popup = await context.newPage();
     // A standalone popup tab emulates the toolbar popup's active-page lookup.
     await popup.addInitScript((id) => {
-      chrome.tabs.query = (() =>
-        Promise.resolve([{ id }])) as unknown as typeof chrome.tabs.query;
+      const query = chrome.tabs.query.bind(chrome.tabs);
+      chrome.tabs.query = ((info: {
+        active?: boolean;
+        currentWindow?: boolean;
+      }) =>
+        info.active && info.currentWindow
+          ? Promise.resolve([{ id }])
+          : query(info)) as unknown as typeof chrome.tabs.query;
     }, tabId);
     await popup.goto(`${root}/popup.html`);
     await expect(
@@ -659,6 +682,20 @@ test('options and popup controls use the real background API without exposing ke
         4.5,
       );
     }
+    const tabCount = context.pages().length;
+    await popup
+      .getByRole('button', { name: '용어집 관리', exact: true })
+      .click();
+    await expect(options).toHaveURL(`${root}/options.html#glossary`);
+    await expect
+      .poll(async () =>
+        options
+          .locator('#glossary')
+          .evaluate((element) => Math.abs(element.getBoundingClientRect().top)),
+      )
+      .toBeLessThan(60);
+    expect(context.pages()).toHaveLength(tabCount);
+    await popup.bringToFront();
     await popup.emulateMedia({ colorScheme: 'light' });
     await popup.getByRole('button', { name: '← 뒤로', exact: true }).click();
     await popup.getByRole('button', { name: '원문만', exact: true }).click();
@@ -914,15 +951,39 @@ test('P6 glossary, manual translations and cache transfer', async () => {
       p.id = 'manual';
       p.textContent = 'Fresh manual hover paragraph.';
       document.body.append(p);
+      const list = document.createElement('ul');
+      list.innerHTML =
+        '<li><div><a><span>Fresh sidebar hover item.</span></a></div></li>';
+      document.body.append(list);
     });
     const beforeHover = await stats();
-    await page.locator('#manual').dispatchEvent('mouseover');
+    await page.bringToFront();
+    const manualBox = (await page.locator('#manual').boundingBox())!;
+    await page.mouse.move(manualBox.x + 20, manualBox.y + manualBox.height / 2);
     expect((await stats()).requests).toBe(beforeHover.requests);
-    await page.locator('#manual').dispatchEvent('mouseover', { altKey: true });
+    await page.keyboard.down('Alt');
     await expect(page.locator('#manual lp-t')).toContainText('[KO]');
     expect((await stats()).items - beforeHover.items).toBe(1);
-    await page.locator('#manual').dispatchEvent('mouseover', { altKey: true });
+    await page.mouse.move(manualBox.x + 25, manualBox.y + manualBox.height / 2);
+    await expect(page.locator('#manual lp-t')).toContainText('[KO]');
+    await page.keyboard.up('Alt');
+    await page.mouse.move(900, 650);
+    await page.keyboard.down('Alt');
+    const sidebar = page.getByText('Fresh sidebar hover item.', {
+      exact: true,
+    });
+    const sidebarBox = (await sidebar.boundingBox())!;
+    await page.mouse.move(
+      sidebarBox.x + 10,
+      sidebarBox.y + sidebarBox.height / 2,
+    );
+    await expect(page.locator('li div > lp-t')).toContainText('[KO]');
+    expect((await stats()).items - beforeHover.items).toBe(2);
+    await page.keyboard.up('Alt');
+    await page.mouse.move(manualBox.x + 20, manualBox.y + manualBox.height / 2);
+    await page.keyboard.down('Alt');
     await expect(page.locator('#manual lp-t')).toHaveCount(0);
+    await page.keyboard.up('Alt');
     await page.evaluate(() => {
       const text = document.querySelector('#other')!.firstChild!;
       const range = document.createRange();

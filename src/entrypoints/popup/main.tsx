@@ -10,6 +10,10 @@ import { uiRequest } from '../../messaging/extension';
 import type { DisplayMode } from '../../messaging/types';
 import { requestProviderPermission } from '../../platform/permissions';
 import {
+  openOptionsTab,
+  type OptionsSection,
+} from '../../platform/open-options';
+import {
   getSettings,
   onSettingsChanged,
   updateSettings,
@@ -27,7 +31,7 @@ export type PopupDeps = {
   queryActiveTab: () => Promise<{ id: number } | undefined>;
   uiRequest: (request: UiRequest) => Promise<UiResponse>;
   confirm: (message: string) => boolean;
-  openOptionsPage: () => void | Promise<void>;
+  openOptionsPage: (section?: OptionsSection) => void | Promise<void>;
   getSettings: typeof getSettings;
   updateSettings: typeof updateSettings;
   onSettingsChanged: typeof onSettingsChanged;
@@ -180,7 +184,7 @@ function PopupSettingsView({
           setMessage={setMessage}
           compact
           allowCustomEngine={false}
-          onOpenAdvancedOptions={() => void deps.openOptionsPage()}
+          onOpenAdvancedOptions={() => void deps.openOptionsPage('engine')}
           onSaved={handleSaved}
           idPrefix="popup"
         />
@@ -190,7 +194,7 @@ function PopupSettingsView({
           type="button"
           class="popup__btn popup__btn--link"
           disabled={busy}
-          onClick={() => void deps.openOptionsPage()}
+          onClick={() => void deps.openOptionsPage('glossary')}
         >
           용어집 관리
         </button>
@@ -198,7 +202,7 @@ function PopupSettingsView({
           type="button"
           class="popup__btn popup__btn--link"
           disabled={busy}
-          onClick={() => void deps.openOptionsPage()}
+          onClick={() => void deps.openOptionsPage('engine')}
         >
           {strings.popup.advancedSettingsLink}
         </button>
@@ -513,7 +517,7 @@ if (appRoot && !import.meta.env.VITEST) {
         },
         uiRequest,
         confirm: (message) => window.confirm(message),
-        openOptionsPage: () => browser.runtime.openOptionsPage(),
+        openOptionsPage: openOptionsTab,
         getSettings,
         updateSettings,
         onSettingsChanged,

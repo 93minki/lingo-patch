@@ -13,6 +13,7 @@ import { isContentPing } from '../messaging/content-ping';
 import type { GlossaryEntry } from '../core/glossary/types';
 import { createSelectionOverlay } from './selection-overlay';
 import { deserialize } from '../core/segment';
+import { findHoverSegment } from './hover-segment';
 
 declare global {
   interface Window {
@@ -335,6 +336,7 @@ export function startPagePipeline() {
   const receive = (message: BackgroundMessage) => {
     if (message.type === 'mode') {
       const wasEnabled = enabled;
+      const wasConfigured = configured;
       const firstMode = lastAuto === undefined;
       const fixedChanged = skipFixedBars !== message.skipFixedBars;
       const revisionChanged = message.revision !== lastRevision;
@@ -357,6 +359,10 @@ export function startPagePipeline() {
       );
       const wasConnected = connected;
       connected = true;
+      if (!wasConfigured && configured && error === 'unconfigured') {
+        error = undefined;
+        report();
+      }
       if (firstMode || changed || enabled !== wasEnabled)
         reset(wasEnabled && !enabled);
       else if (!wasConnected || revisionChanged) {
@@ -482,6 +488,10 @@ export function startPagePipeline() {
   ) {
     if (!connected || !configured) {
       if (selection) selectionOverlay.showResult('번역 설정을 확인하세요.');
+      if (!configured) {
+        error = 'unconfigured';
+        report();
+      }
       return;
     }
     const epoch = generation;
@@ -493,6 +503,7 @@ export function startPagePipeline() {
     });
     if (disposed || generation !== epoch) return;
     if (record) {
+      ensureStyle(document);
       record.key = key;
       manualBlocks.set(record.segment.block, record);
     }
@@ -500,30 +511,22 @@ export function startPagePipeline() {
     if (memory.has(key)) finishManual(key, memory.get(key)!);
     else post({ type: 'lookup', keys: [key] });
   }
-  const onHover = (event: MouseEvent) => {
-    const modifier =
-      hoverModifier === 'alt'
-        ? event.altKey
-        : hoverModifier === 'control'
-          ? event.ctrlKey
-          : hoverModifier === 'shift'
-            ? event.shiftKey
-            : false;
-    if (
-      !modifier ||
-      !(event.target instanceof Element) ||
-      event.target.closest('input,textarea,select,[contenteditable],lp-t')
-    )
-      return;
-    const block = event.target.closest(
-      'p,li,h1,h2,h3,h4,h5,h6,td,th,blockquote,dt,dd',
+  let pointer: Element | null = null;
+  let modifierDown = false;
+  let hoverFrame: number | undefined;
+  const visitedBlocks = new Set<Element>();
+  const editing = () =>
+    Boolean(
+      document.activeElement?.closest(
+        'input,textarea,select,[contenteditable]:not([contenteditable="false"])',
+      ),
     );
-    if (
-      !block ||
-      (event.relatedTarget instanceof Node &&
-        block.contains(event.relatedTarget))
-    )
-      return;
+  const activateHover = () => {
+    if (!modifierDown || !pointer || editing()) return;
+    const segment = findHoverSegment(pointer, document.body, targetLang);
+    if (!segment || visitedBlocks.has(segment.block)) return;
+    const block = segment.block;
+    visitedBlocks.add(block);
     const automatic = records.find(
       (record) => record.segment.block === block && memory.has(record.key),
     );
@@ -545,12 +548,60 @@ export function startPagePipeline() {
       manual.delete(previous.key);
       return;
     }
-    const segment = findSegments(block, { targetLang }).find(
-      (item) => item.block === block,
-    );
-    if (!segment) return;
     const record = renderer.create('', segment);
     void requestManual(segment.markup, record);
+  };
+  const modifierPressed = (event: MouseEvent) =>
+    hoverModifier === 'alt'
+      ? event.altKey
+      : hoverModifier === 'control'
+        ? event.ctrlKey
+        : hoverModifier === 'shift'
+          ? event.shiftKey
+          : false;
+  const modifierName = () =>
+    hoverModifier === 'alt'
+      ? 'Alt'
+      : hoverModifier === 'control'
+        ? 'Control'
+        : hoverModifier === 'shift'
+          ? 'Shift'
+          : '';
+  const onMouseMove = (event: MouseEvent) => {
+    pointer = event.target instanceof Element ? event.target : null;
+    if (!modifierPressed(event)) {
+      modifierDown = false;
+      visitedBlocks.clear();
+      return;
+    }
+    if (!modifierDown) {
+      modifierDown = true;
+      visitedBlocks.clear();
+    }
+    if (hoverFrame === undefined)
+      hoverFrame = requestAnimationFrame(() => {
+        hoverFrame = undefined;
+        activateHover();
+      });
+  };
+  const onModifierDown = (event: KeyboardEvent) => {
+    if (event.key !== modifierName() || modifierDown || editing()) return;
+    modifierDown = true;
+    visitedBlocks.clear();
+    activateHover();
+  };
+  const onModifierUp = (event: KeyboardEvent) => {
+    if (event.key !== modifierName()) return;
+    modifierDown = false;
+    visitedBlocks.clear();
+  };
+  const onMouseLeave = (event: MouseEvent) => {
+    if (!event.relatedTarget) pointer = null;
+  };
+  const onWindowBlur = () => {
+    pointer = null;
+    modifierDown = false;
+    visitedBlocks.clear();
   };
   const onSelection = (event: MouseEvent) => {
     if (
@@ -579,7 +630,11 @@ export function startPagePipeline() {
       selection.getRangeAt(0).getBoundingClientRect(),
     );
   };
-  document.addEventListener('mouseover', onHover);
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseout', onMouseLeave);
+  document.addEventListener('keydown', onModifierDown);
+  document.addEventListener('keyup', onModifierUp);
+  window.addEventListener('blur', onWindowBlur);
   document.addEventListener('mouseup', onSelection);
   const connect = () => {
     if (disposed || !started) return;
@@ -656,7 +711,12 @@ export function startPagePipeline() {
     window.removeEventListener('pageshow', onPageshow);
     document.removeEventListener('prerenderingchange', onPrerenderingChange);
     browser.runtime.onMessage.removeListener(onPing);
-    document.removeEventListener('mouseover', onHover);
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseout', onMouseLeave);
+    document.removeEventListener('keydown', onModifierDown);
+    document.removeEventListener('keyup', onModifierUp);
+    window.removeEventListener('blur', onWindowBlur);
+    if (hoverFrame !== undefined) cancelAnimationFrame(hoverFrame);
     document.removeEventListener('mouseup', onSelection);
     selectionOverlay.destroy();
     if (window.__lpPipelineDispose === dispose)

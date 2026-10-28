@@ -70,7 +70,7 @@ body {
 
 .options {
   box-sizing: border-box;
-  max-width: 720px;
+  max-width: 760px;
   margin: 0 auto;
   padding: 20px 18px 32px;
   font:
@@ -98,6 +98,41 @@ body {
   border: 1px solid var(--lp-border-subtle);
   border-radius: 12px;
   background: var(--lp-surface);
+  scroll-margin-top: 16px;
+}
+
+.options__toc {
+  margin: 0 0 20px;
+  padding: 12px 16px;
+  border: 1px solid var(--lp-border-subtle);
+  border-radius: 12px;
+  background: var(--lp-surface);
+}
+
+.options__toc ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.options__toc a {
+  color: var(--lp-text);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+
+.options__toc a:hover,
+.options__toc a:focus-visible {
+  border-bottom-color: var(--lp-muted);
+  outline: none;
+}
+
+.options section:target {
+  box-shadow: 0 0 0 2px var(--lp-border);
 }
 
 .options label {
