@@ -34,3 +34,19 @@ npm run typecheck && npm run lint && npm test && npm run build && npm run build:
 
 ## 보고
 결과 요약, Cursor에 맡긴 일과 검토 내용, 바꾼 파일, 컴포넌트 재사용 구조, 남은 문제
+
+---
+
+## 추가 요구사항 (사용자 피드백, 같은 작업에서 처리)
+
+### A. 다크 모드 가독성
+현상: 다크 모드에서 옵션 페이지(브라우저가 띄우는 옵션 창)의 숫자 입력칸(보관 기간 90, 용량 상한 20)과 일부 입력칸 글자가 배경과 같은 색이라 보이지 않는다. 비활성 버튼(추가, 사이트별 삭제)도 거의 보이지 않는다.
+- 옵션 페이지·팝업 모두 `:root { color-scheme: light dark; }`를 선언하고, 색은 CSS 변수(배경·표면·글자·보조 글자·테두리·입력 배경·입력 글자·placeholder·비활성)로 정의해 `prefers-color-scheme: dark`에서 값만 바꾼다
+- `input`, `select`, `textarea`, `button`의 배경·글자·테두리·placeholder·`:disabled` 색을 명시 (브라우저 기본값에 맡기지 않음)
+- 진행 표시(상단 알약)도 다크 모드에서 대비 확인
+- 검증: 라이트·다크 두 모드로 옵션·팝업(메인·설정) 화면을 Playwright `colorScheme`으로 캡처해 `.output/ui-*-{light,dark}.png`로 저장하고, 주요 텍스트 대비가 WCAG AA(4.5:1) 이상인지 단위 테스트나 스크립트로 확인
+
+### B. Mac 단축키를 Control로
+- `commands`의 `suggested_key`에 `mac` 항목 추가: `toggle-translate` = `MacCtrl+A`, `cycle-mode` = `MacCtrl+S` (다른 OS는 `Alt+A`, `Alt+S` 유지)
+- 주의: `suggested_key`는 **새로 설치할 때만** 적용된다. 이미 설치된 확장은 기존 단축키가 유지되므로, 옵션·팝업 단축키 안내 문구에 "브라우저 단축키 설정에서 바꿀 수 있습니다"를 유지하고, 보고서에 사용자가 할 일(확장 제거 후 재설치 또는 `brave://extensions/shortcuts`에서 변경)을 적는다
+- 단축키 표시 문구가 Mac에서 `⌃A`로 보이는지 확인
