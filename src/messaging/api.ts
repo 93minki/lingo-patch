@@ -1,5 +1,6 @@
 import { browser, type Browser } from 'wxt/browser';
 import { createProvider, ProviderError } from '../providers';
+import { PRESETS } from '../providers/presets';
 import {
   getSettings,
   updateSettings,
@@ -105,6 +106,8 @@ export function createUiApi(getService: () => Promise<Service>) {
       sender.url?.startsWith(browser.runtime.getURL(''));
     const optionsPage =
       ownPage && new URL(sender.url!).pathname === '/options.html';
+    const popupPage =
+      ownPage && new URL(sender.url!).pathname === '/popup.html';
     if (!ownPage) {
       if (request.type === 'openOptions' && sender.id === browser.runtime.id) {
         await browser.runtime.openOptionsPage();
@@ -118,9 +121,16 @@ export function createUiApi(getService: () => Promise<Service>) {
         return { ok: true };
       }
       if (request.type === 'validateProvider') {
-        if (!optionsPage) return { ok: false, error: 'permission' };
+        if (!optionsPage && !popupPage)
+          return { ok: false, error: 'permission' };
         const cfg = normalizeSettings({ provider: request.cfg }).provider;
         if (!cfg) return { ok: false, error: 'bad_request' };
+        if (
+          popupPage &&
+          cfg.provider === 'openai-compatible' &&
+          !PRESETS.some((preset) => preset.baseUrl === cfg.baseUrl)
+        )
+          return { ok: false, error: 'permission' };
         if (
           cfg.baseUrl &&
           !(await browser.permissions.contains({

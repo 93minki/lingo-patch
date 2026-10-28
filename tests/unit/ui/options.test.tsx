@@ -457,6 +457,30 @@ test('toggles API key visibility', async () => {
   );
 });
 
+test('keeps saved OpenRouter model before listModels', async () => {
+  const savedModel = 'anthropic/claude-3.5-sonnet';
+  getSettings.mockResolvedValue({
+    provider: {
+      provider: 'openai-compatible',
+      apiKey: 'saved-key',
+      model: savedModel,
+      baseUrl: 'https://openrouter.ai/api/v1',
+    },
+    preset: 'openrouter',
+    targetLang: 'ko',
+    autoSites: [],
+    displayMode: 'bilingual',
+    cache: { ttlDays: 90, maxMB: 20 },
+  } satisfies Settings);
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  render(<OptionsApp deps={deps()} />, root);
+  await vi.waitFor(() => {
+    const select = root.querySelector('#lp-model') as HTMLSelectElement;
+    expect(select?.value).toBe(savedModel);
+  });
+});
+
 test('custom engine always uses text model input', async () => {
   getSettings.mockResolvedValue({
     provider: {

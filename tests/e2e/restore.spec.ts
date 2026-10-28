@@ -66,7 +66,7 @@ async function cycleMode(page: Page, context: BrowserContext) {
   // macOS extension accelerators need native key codes omitted by Playwright.
   const cdp = await context.newCDPSession(page);
   const event = {
-    modifiers: 1,
+    modifiers: 2,
     key: 's',
     code: 'KeyS',
     windowsVirtualKeyCode: 83,
@@ -75,6 +75,39 @@ async function cycleMode(page: Page, context: BrowserContext) {
   await cdp.send('Input.dispatchKeyEvent', { ...event, type: 'rawKeyDown' });
   await cdp.send('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
   await cdp.detach();
+}
+
+async function contrast(page: Page, selector: string): Promise<number> {
+  return page.locator(selector).evaluate((element) => {
+    const style = getComputedStyle(element);
+    const read = (color: string) => (color.match(/[\d.]+/g) ?? []).map(Number);
+    const fg = read(style.color),
+      bg = read(style.backgroundColor);
+    if (fg.length < 3 || bg.length < 3) return 0;
+    const luminance = (rgb: number[]) =>
+      rgb.slice(0, 3).reduce((sum, value, index) => {
+        const s = value / 255;
+        const linear = s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+        return sum + linear * [0.2126, 0.7152, 0.0722][index]!;
+      }, 0);
+    return Math.min(
+      ...[0, 255].map((base) => {
+        const bgAlpha = bg[3] ?? 1,
+          fgAlpha = fg[3] ?? 1;
+        const surface = bg
+          .slice(0, 3)
+          .map((value) => value * bgAlpha + base * (1 - bgAlpha));
+        const text = fg
+          .slice(0, 3)
+          .map(
+            (value, index) => value * fgAlpha + surface[index]! * (1 - fgAlpha),
+          );
+        const a = luminance(text),
+          b = luminance(surface);
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      }),
+    );
+  });
 }
 
 test('persistent paragraph cache, original DOM, lazy requests and keyboard modes', async () => {
@@ -194,6 +227,18 @@ test('persistent paragraph cache, original DOM, lazy requests and keyboard modes
       'data-lp-mode',
       'bilingual',
     );
+    if (platform() === 'darwin') {
+      const commands = await context!
+        .serviceWorkers()[0]!
+        .evaluate(() => chrome.commands.getAll());
+      expect(
+        commands.find((command) => command.name === 'toggle-translate')
+          ?.shortcut,
+      ).toBe('⌃A');
+      expect(
+        commands.find((command) => command.name === 'cycle-mode')?.shortcut,
+      ).toBe('⌃S');
+    }
     const rendered = await page.locator('lp-t').count();
     for (const mode of ['translation', 'original', 'bilingual']) {
       await page.bringToFront();
@@ -205,7 +250,7 @@ test('persistent paragraph cache, original DOM, lazy requests and keyboard modes
     }
     await sourceUnchanged(page);
     counts.push({
-      scenario: 'Alt+S modes',
+      scenario: 'cycle-mode shortcut',
       additionalCalls: (await stats()).requests - previous.requests,
     });
     expect((await stats()).requests).toBe(previous.requests);
@@ -263,6 +308,13 @@ test('delayed requests finish after navigation, progress passes clicks, and retr
     const progress = page.locator('lp-progress').locator('.pill');
     await expect(progress).toBeVisible();
     await expect(progress).toContainText('번역 중');
+    for (const scheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      expect(await contrast(page, 'lp-progress .pill')).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    }
+    await page.emulateMedia({ colorScheme: 'light' });
     const point = await progress.boundingBox();
     expect(
       await page.evaluate(
@@ -402,10 +454,23 @@ test('options and popup controls use the real background API without exposing ke
       'password',
     );
     await expect(options.locator('.options__onboarding a')).toHaveCount(6);
-    await options.screenshot({
-      path: '.output/ui-options-onboarding.png',
-      fullPage: true,
-    });
+    for (const scheme of ['light', 'dark'] as const) {
+      await options.emulateMedia({ colorScheme: scheme });
+      await options.screenshot({
+        path: `.output/ui-options-${scheme}.png`,
+        fullPage: true,
+      });
+      for (const selector of [
+        '.options',
+        '#lp-cache-ttl',
+        '#lp-cache-max',
+        '#lp-api-key',
+        '.options__btn--primary',
+        '.options__site-list ~ .options__row button:disabled',
+      ])
+        expect(await contrast(options, selector)).toBeGreaterThanOrEqual(4.5);
+    }
+    await options.emulateMedia({ colorScheme: 'light' });
     await options
       .getByRole('combobox', { name: '번역 엔진', exact: true })
       .selectOption('custom');
@@ -451,7 +516,44 @@ test('options and popup controls use the real background API without exposing ke
     expect(await popup.locator('body').innerText()).not.toContain(
       'local-fake-secret',
     );
-    await popup.screenshot({ path: '.output/ui-popup.png', fullPage: true });
+    for (const scheme of ['light', 'dark'] as const) {
+      await popup.emulateMedia({ colorScheme: scheme });
+      await popup.screenshot({
+        path: `.output/ui-popup-main-${scheme}.png`,
+        fullPage: true,
+      });
+      expect(await contrast(popup, '.popup')).toBeGreaterThanOrEqual(4.5);
+      if (await popup.locator('.popup__btn--primary').count())
+        expect(
+          await contrast(popup, '.popup__btn--primary'),
+        ).toBeGreaterThanOrEqual(4.5);
+    }
+    await popup.emulateMedia({ colorScheme: 'light' });
+    await popup.getByRole('button', { name: '설정', exact: true }).click();
+    await expect(popup.getByRole('main', { name: '번역 설정' })).toBeVisible();
+    await expect(popup.getByText(/고급 설정 페이지에서 구성/)).toBeVisible();
+    await popup
+      .getByRole('combobox', { name: '번역 엔진', exact: true })
+      .selectOption('gemini');
+    for (const scheme of ['light', 'dark'] as const) {
+      await popup.emulateMedia({ colorScheme: scheme });
+      await popup.screenshot({
+        path: `.output/ui-popup-settings-${scheme}.png`,
+        fullPage: true,
+      });
+      expect(await contrast(popup, '.popup')).toBeGreaterThanOrEqual(4.5);
+      expect(
+        await contrast(popup, 'input[type=password]'),
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        await contrast(popup, '.lp-settings-btn--primary'),
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(await contrast(popup, 'select:disabled')).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    }
+    await popup.emulateMedia({ colorScheme: 'light' });
+    await popup.getByRole('button', { name: '← 뒤로', exact: true }).click();
     await popup.getByRole('button', { name: '원문만', exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute(
       'data-lp-mode',

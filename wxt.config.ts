@@ -18,11 +18,11 @@ export default defineConfig({
     optional_host_permissions: ['https://*/*', 'http://*/*'],
     commands: {
       'toggle-translate': {
-        suggested_key: { default: 'Alt+A' },
+        suggested_key: { default: 'Alt+A', mac: 'MacCtrl+A' },
         description: 'Toggle page translation',
       },
       'cycle-mode': {
-        suggested_key: { default: 'Alt+S' },
+        suggested_key: { default: 'Alt+S', mac: 'MacCtrl+S' },
         description: 'Cycle translation display mode',
       },
     },

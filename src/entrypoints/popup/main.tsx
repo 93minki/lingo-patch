@@ -8,14 +8,29 @@ import type {
 } from '../../messaging/extension';
 import { uiRequest } from '../../messaging/extension';
 import type { DisplayMode } from '../../messaging/types';
+import { requestProviderPermission } from '../../platform/permissions';
+import {
+  getSettings,
+  onSettingsChanged,
+  updateSettings,
+  type Settings,
+} from '../../storage/settings';
+import { KEY_LINKS } from '../../ui/key-links';
+import { SettingsSections } from '../../ui/SettingsSections';
 import { strings } from '../../ui/strings';
 import './popup.css';
+
+export type PopupView = 'main' | 'settings';
 
 export type PopupDeps = {
   queryActiveTab: () => Promise<{ id: number } | undefined>;
   uiRequest: (request: UiRequest) => Promise<UiResponse>;
   confirm: (message: string) => boolean;
   openOptionsPage: () => void | Promise<void>;
+  getSettings: typeof getSettings;
+  updateSettings: typeof updateSettings;
+  onSettingsChanged: typeof onSettingsChanged;
+  requestProviderPermission: typeof requestProviderPermission;
 };
 
 const POLL_MS = 500;
@@ -66,7 +81,118 @@ function PopupSettingsLink({
   );
 }
 
+function PopupSettingsView({
+  deps,
+  onBack,
+}: {
+  deps: PopupDeps;
+  onBack: () => void;
+}) {
+  const [settings, setSettings] = useState<Settings | undefined>();
+  const [loadError, setLoadError] = useState<string | undefined>();
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | undefined>();
+  const [error, setError] = useState<string | undefined>();
+
+  useEffect(() => {
+    let alive = true;
+    setLoadError(undefined);
+    void deps
+      .getSettings()
+      .then((next) => {
+        if (!alive) return;
+        setSettings(next);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setLoadError(strings.popup.requestFailed);
+      });
+    const stop = deps.onSettingsChanged((next) => {
+      if (!alive) return;
+      setSettings(next);
+    });
+    return () => {
+      alive = false;
+      stop();
+    };
+  }, [deps]);
+
+  const handleSaved = () => {
+    onBack();
+  };
+
+  return (
+    <main
+      class="popup popup--settings popup--scroll"
+      aria-label={strings.popup.settingsScreen}
+      aria-busy={busy}
+    >
+      <div class="popup__settings-head">
+        <button
+          type="button"
+          class="popup__btn popup__btn--back"
+          disabled={busy}
+          aria-label={strings.popup.settingsBack}
+          onClick={onBack}
+        >
+          {strings.popup.settingsBack}
+        </button>
+      </div>
+      {loadError ? <p class="popup__error">{loadError}</p> : null}
+      {error ? <p class="popup__error">{error}</p> : null}
+      {message ? <p class="popup__success">{message}</p> : null}
+      {!settings && !loadError ? (
+        <p class="popup__message">{strings.popup.loading}</p>
+      ) : null}
+      {settings && settings.provider === null ? (
+        <section class="popup__free-hint" aria-label={strings.options.onboardingFreeTitle}>
+          <p class="popup__message">
+            {strings.popup.freeKeyHint}{' '}
+            <a href={KEY_LINKS.gemini.signup} target="_blank" rel="noreferrer">
+              Gemini
+            </a>
+          </p>
+          <p class="popup__message popup__message--muted">
+            {strings.popup.freeKeyAdvanced}
+          </p>
+        </section>
+      ) : null}
+      {settings ? (
+        <SettingsSections
+          settings={settings}
+          deps={{
+            uiRequest: deps.uiRequest,
+            updateSettings: deps.updateSettings,
+            getSettings: deps.getSettings,
+            requestProviderPermission: deps.requestProviderPermission,
+          }}
+          busy={busy}
+          setBusy={setBusy}
+          setError={setError}
+          setMessage={setMessage}
+          compact
+          allowCustomEngine={false}
+          onOpenAdvancedOptions={() => void deps.openOptionsPage()}
+          onSaved={handleSaved}
+          idPrefix="popup"
+        />
+      ) : null}
+      <p class="popup__footer popup__footer--advanced">
+        <button
+          type="button"
+          class="popup__btn popup__btn--link"
+          disabled={busy}
+          onClick={() => void deps.openOptionsPage()}
+        >
+          {strings.popup.advancedSettingsLink}
+        </button>
+      </p>
+    </main>
+  );
+}
+
 export function PopupApp({ deps }: { deps: PopupDeps }) {
+  const [view, setView] = useState<PopupView>('main');
   const [tabId, setTabId] = useState<number | null | undefined>(undefined);
   const [status, setStatus] = useState<TabStatus | undefined>();
   const [busy, setBusy] = useState(false);
@@ -152,13 +278,16 @@ export function PopupApp({ deps }: { deps: PopupDeps }) {
     }
   };
 
-  const openSettings = () => void deps.openOptionsPage();
+  const openSettings = () => setView('settings');
 
-  const openOptions = () =>
-    void run(async () => {
-      const response = await deps.uiRequest({ type: 'openOptions' });
-      if (!response.ok) throw new Error('failed');
-    });
+  const leaveSettings = () => {
+    setView('main');
+    void refresh();
+  };
+
+  if (view === 'settings') {
+    return <PopupSettingsView deps={deps} onBack={leaveSettings} />;
+  }
 
   if (bootstrapError) {
     return (
@@ -214,7 +343,7 @@ export function PopupApp({ deps }: { deps: PopupDeps }) {
           class="popup__btn popup__btn--primary popup__btn--ghost"
           disabled={busy}
           aria-label={strings.popup.configure}
-          onClick={openOptions}
+          onClick={openSettings}
         >
           {strings.popup.configure}
         </button>
@@ -371,6 +500,10 @@ if (appRoot && !import.meta.env.VITEST) {
         uiRequest,
         confirm: (message) => window.confirm(message),
         openOptionsPage: () => browser.runtime.openOptionsPage(),
+        getSettings,
+        updateSettings,
+        onSettingsChanged,
+        requestProviderPermission,
       }}
     />,
     appRoot,

@@ -33,6 +33,16 @@ export const strings = {
     statsPending: '남음',
     statsSection: '페이지 통계',
     settings: '설정',
+    settingsBack: '← 뒤로',
+    settingsScreen: '번역 설정',
+    freeKeyHint:
+      'Google AI Studio에서 Gemini API 키를 발급해 아래에 붙여 넣을 수 있습니다.',
+    freeKeyAdvanced: '다른 무료 선택지는 고급 설정에서 확인하세요.',
+    customEngineGuide:
+      '직접 입력(OpenAI 호환)은 고급 설정 페이지에서 구성할 수 있습니다.',
+    openAdvancedOptions: '고급 설정 열기',
+    advancedSettingsLink:
+      '고급 설정 (자동 번역 사이트, 캐시, 단축키)',
     requestFailed: '요청에 실패했습니다',
     retry: '다시 시도',
   },

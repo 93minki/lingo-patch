@@ -114,7 +114,7 @@ test('returns only safe tab state and routes toggle and preferences', async () =
   await api({ type: 'setDisplayMode', displayMode: 'original' }, popup);
   expect(mock.update).toHaveBeenCalledWith({ displayMode: 'original' });
 });
-test('only options can validate keys and delete cache; content can open settings only', async () => {
+test('popup and options validate known providers; only options deletes cache', async () => {
   const cfg = {
     provider: 'openai-compatible',
     apiKey: 'fake',
@@ -125,6 +125,30 @@ test('only options can validate keys and delete cache; content can open settings
     ok: false,
     error: 'permission',
   });
+  expect(
+    await api(
+      {
+        type: 'validateProvider',
+        cfg: { provider: 'gemini', apiKey: 'fake', model: 'model' },
+      },
+      popup,
+    ),
+  ).toEqual({ ok: true, models: ['model-a'] });
+  expect(
+    await api(
+      {
+        type: 'validateProvider',
+        cfg: {
+          provider: 'openai-compatible',
+          apiKey: 'fake',
+          model: 'm',
+          baseUrl: 'https://api.groq.com/openai/v1',
+        },
+      },
+      popup,
+    ),
+  ).toEqual({ ok: true, models: ['model-a'] });
+  mock.models.mockClear();
   expect(await api({ type: 'validateProvider', cfg }, content)).toEqual({
     ok: false,
     error: 'permission',

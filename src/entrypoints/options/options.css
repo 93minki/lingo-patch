@@ -1,3 +1,73 @@
+:root {
+  color-scheme: light dark;
+
+  --lp-bg: #fafafa;
+  --lp-surface: #ffffff;
+  --lp-text: #1a1a1a;
+  --lp-muted: #555555;
+  --lp-border: rgba(0, 0, 0, 0.12);
+  --lp-border-subtle: rgba(0, 0, 0, 0.08);
+  --lp-divider: rgba(0, 0, 0, 0.06);
+
+  --lp-input-bg: #ffffff;
+  --lp-input-text: #1a1a1a;
+  --lp-input-border: rgba(0, 0, 0, 0.15);
+  --lp-placeholder: #767676;
+
+  --lp-disabled-bg: #ececec;
+  --lp-disabled-text: #666666;
+  --lp-disabled-border: rgba(0, 0, 0, 0.1);
+
+  --lp-btn-bg: #ffffff;
+  --lp-btn-text: #1a1a1a;
+  --lp-btn-border: rgba(0, 0, 0, 0.12);
+
+  --lp-primary-bg: #1a1a1a;
+  --lp-primary-text: #ffffff;
+  --lp-primary-border: #1a1a1a;
+
+  --lp-error-text: #8b1a1a;
+  --lp-success-text: #1f6b3a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --lp-bg: #121212;
+    --lp-surface: #1b1b1b;
+    --lp-text: #f2f2f2;
+    --lp-muted: #aaaaaa;
+    --lp-border: rgba(255, 255, 255, 0.12);
+    --lp-border-subtle: rgba(255, 255, 255, 0.1);
+    --lp-divider: rgba(255, 255, 255, 0.08);
+
+    --lp-input-bg: #222222;
+    --lp-input-text: #f2f2f2;
+    --lp-input-border: rgba(255, 255, 255, 0.18);
+    --lp-placeholder: #9a9a9a;
+
+    --lp-disabled-bg: #2a2a2a;
+    --lp-disabled-text: #aaaaaa;
+    --lp-disabled-border: rgba(255, 255, 255, 0.08);
+
+    --lp-btn-bg: #222222;
+    --lp-btn-text: #f2f2f2;
+    --lp-btn-border: rgba(255, 255, 255, 0.12);
+
+    --lp-primary-bg: #f2f2f2;
+    --lp-primary-text: #111111;
+    --lp-primary-border: #f2f2f2;
+
+    --lp-error-text: #ffb4b4;
+    --lp-success-text: #b8e6c4;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--lp-bg);
+  color: var(--lp-text);
+}
+
 .options {
   box-sizing: border-box;
   max-width: 720px;
@@ -8,14 +78,8 @@
     -apple-system,
     'Segoe UI',
     sans-serif;
-  color: #1a1a1a;
-  background: #fafafa;
-}
-
-body {
-  margin: 0;
-  background: #fafafa;
-  color: #1a1a1a;
+  color: var(--lp-text);
+  background: var(--lp-bg);
 }
 
 .options h1 {
@@ -31,9 +95,9 @@ body {
 .options section {
   margin-bottom: 22px;
   padding: 14px 16px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--lp-border-subtle);
   border-radius: 12px;
-  background: #fff;
+  background: var(--lp-surface);
 }
 
 .options label {
@@ -41,11 +105,16 @@ body {
   margin-bottom: 6px;
   font-size: 12px;
   font-weight: 600;
-  color: #555;
+  color: var(--lp-muted);
 }
 
 .options input,
 .options select,
+.options textarea {
+  font: inherit;
+  color: var(--lp-input-text);
+}
+
 .options button {
   font: inherit;
 }
@@ -54,14 +123,32 @@ body {
 .options input[type='password'],
 .options input[type='url'],
 .options input[type='number'],
-.options select {
+.options select,
+.options textarea {
   width: 100%;
   box-sizing: border-box;
   margin-bottom: 10px;
   padding: 8px 10px;
-  border: 1px solid rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--lp-input-border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--lp-input-bg);
+  color: var(--lp-input-text);
+}
+
+.options input::placeholder,
+.options textarea::placeholder {
+  color: var(--lp-placeholder);
+  opacity: 1;
+}
+
+.options input:disabled,
+.options select:disabled,
+.options textarea:disabled {
+  background: var(--lp-disabled-bg);
+  color: var(--lp-disabled-text);
+  border-color: var(--lp-disabled-border);
+  cursor: not-allowed;
+  opacity: 1;
 }
 
 .options .options__row > input {
@@ -80,21 +167,44 @@ body {
 
 .options__btn {
   padding: 8px 12px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--lp-btn-border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--lp-btn-bg);
+  color: var(--lp-btn-text);
   cursor: pointer;
 }
 
+.options button.options__btn {
+  color: var(--lp-btn-text);
+}
+
+.options button.options__btn--primary {
+  color: var(--lp-primary-text);
+}
+
+.options button.options__btn--primary:disabled,
+.options button.options__btn:disabled {
+  color: var(--lp-disabled-text);
+}
+
 .options__btn:disabled {
-  opacity: 0.55;
+  background: var(--lp-disabled-bg);
+  color: var(--lp-disabled-text);
+  border-color: var(--lp-disabled-border);
   cursor: not-allowed;
+  opacity: 1;
 }
 
 .options__btn--primary {
-  background: #1a1a1a;
-  border-color: #1a1a1a;
-  color: #fff;
+  background: var(--lp-primary-bg);
+  border-color: var(--lp-primary-border);
+  color: var(--lp-primary-text);
+}
+
+.options__btn--primary:disabled {
+  background: var(--lp-disabled-bg);
+  color: var(--lp-disabled-text);
+  border-color: var(--lp-disabled-border);
 }
 
 .options__hint,
@@ -106,15 +216,15 @@ body {
 }
 
 .options__error {
-  color: #8b1a1a;
+  color: var(--lp-error-text);
 }
 
 .options__success {
-  color: #1f6b3a;
+  color: var(--lp-success-text);
 }
 
 .options__notice {
-  color: #555;
+  color: var(--lp-muted);
 }
 
 .options__site-list {
@@ -128,7 +238,7 @@ body {
   justify-content: space-between;
   gap: 8px;
   padding: 6px 0;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  border-bottom: 1px solid var(--lp-divider);
 }
 
 .options__onboarding ol {
@@ -138,36 +248,6 @@ body {
 
 .options a {
   color: inherit;
-}
-
-@media (prefers-color-scheme: dark) {
-  body {
-    background: #121212;
-    color: #f2f2f2;
-  }
-  .options {
-    color: #f2f2f2;
-    background: #121212;
-  }
-  .options section {
-    background: #1b1b1b;
-    border-color: rgba(255, 255, 255, 0.1);
-  }
-  .options input,
-  .options select,
-  .options__btn {
-    background: #222;
-    border-color: rgba(255, 255, 255, 0.12);
-    color: inherit;
-  }
-  .options__btn--primary {
-    background: #f2f2f2;
-    color: #111;
-  }
-  .options label,
-  .options__notice {
-    color: #aaa;
-  }
 }
 
 @media (max-width: 480px) {
