@@ -10,6 +10,9 @@ import { SegmentRenderer, type RenderRecord } from './renderer';
 import { ensureStyle } from './style';
 import { createFixedBarFilter } from './fixed-bars';
 import { isContentPing } from '../messaging/content-ping';
+import type { GlossaryEntry } from '../core/glossary/types';
+import { createSelectionOverlay } from './selection-overlay';
+import { deserialize } from '../core/segment';
 
 declare global {
   interface Window {
@@ -28,6 +31,15 @@ export function startPagePipeline() {
   const translated = new Set<string>();
   let error: ProviderError['kind'] | 'unconfigured' | undefined;
   let configured = false;
+  let glossary: GlossaryEntry[] = [];
+  let hoverModifier: 'alt' | 'control' | 'shift' | 'off' = 'alt';
+  let selectionTranslation = true;
+  const manual = new Map<
+    string,
+    { markup: string; record?: RenderRecord; selection?: boolean }
+  >();
+  const manualBlocks = new Map<Element, RenderRecord>();
+  const hiddenBlocks = new Set<Element>();
   let skipFixedBars = true;
   let forceAll = false;
   const progress = createProgress(document, () => {
@@ -95,6 +107,7 @@ export function startPagePipeline() {
                 markup: segment.markup,
                 targetLang,
                 promptVersion: PROMPT_VERSION,
+                glossary,
               }),
             ),
         ),
@@ -201,6 +214,7 @@ export function startPagePipeline() {
             markup: segment.markup,
             targetLang,
             promptVersion: PROMPT_VERSION,
+            glossary,
           }),
         })),
       );
@@ -225,7 +239,8 @@ export function startPagePipeline() {
         }
         record.segment = segment;
         next.push(record);
-        if (memory.has(key)) renderer.render(record, 'ready', memory.get(key));
+        if (memory.has(key) && !hiddenBlocks.has(segment.block))
+          renderer.render(record, 'ready', memory.get(key));
       }
       for (const old of records) if (!next.includes(old)) renderer.remove(old);
       records = next;
@@ -278,7 +293,10 @@ export function startPagePipeline() {
     intersection?.disconnect();
     if (scanTimer) clearTimeout(scanTimer);
     scanTimer = undefined;
-    renderer.clear(records);
+    renderer.clear([...records, ...manualBlocks.values()]);
+    manualBlocks.clear();
+    hiddenBlocks.clear();
+    manual.clear();
     records = [];
     requested.clear();
     memory.clear();
@@ -320,8 +338,13 @@ export function startPagePipeline() {
       const firstMode = lastAuto === undefined;
       const fixedChanged = skipFixedBars !== message.skipFixedBars;
       const revisionChanged = message.revision !== lastRevision;
+      const glossaryChanged =
+        JSON.stringify(glossary) !== JSON.stringify(message.glossary ?? []);
+      glossary = message.glossary ?? [];
       skipFixedBars = message.skipFixedBars;
       configured = message.configured;
+      hoverModifier = message.hoverModifier ?? 'alt';
+      selectionTranslation = message.selectionTranslation !== false;
       const changed = message.targetLang !== targetLang;
       if (lastAuto === undefined || lastAuto !== message.autoEnabled)
         enabled = message.autoEnabled;
@@ -348,7 +371,12 @@ export function startPagePipeline() {
           scheduleScan(0);
         } else void inspect().catch(() => {});
       }
-      if (fixedChanged && !firstMode && !changed && enabled === wasEnabled) {
+      if (
+        (fixedChanged || glossaryChanged) &&
+        !firstMode &&
+        !changed &&
+        enabled === wasEnabled
+      ) {
         if (enabled) scheduleScan(0);
         else void inspect().catch(() => {});
       }
@@ -369,6 +397,26 @@ export function startPagePipeline() {
       enabled = !enabled;
       reset(!enabled);
       return;
+    }
+    if (message.type === 'cached') {
+      for (const key of message.keys) {
+        const item = manual.get(key);
+        if (!item) continue;
+        const found = message.entries.find((entry) => entry.key === key);
+        if (found) finishManual(key, found.text);
+        else
+          post({
+            type: 'translate',
+            items: [{ key, markup: item.markup, priority: 2 }],
+          });
+      }
+    } else if (message.type === 'translated')
+      finishManual(message.key, message.text);
+    else if (message.type === 'failed' && manual.has(message.key)) {
+      const item = manual.get(message.key)!;
+      if (item.record) renderer.render(item.record, 'error');
+      if (item.selection) selectionOverlay.showResult('번역하지 못했습니다.');
+      manual.delete(message.key);
     }
     if (!enabled) return;
     if (message.type === 'cached') {
@@ -409,6 +457,130 @@ export function startPagePipeline() {
     previous?.disconnect();
     connect();
   };
+  const selectionOverlay = createSelectionOverlay(document, (text) => {
+    const markup = text
+      .replace(/&/gu, '&amp;')
+      .replace(/</gu, '&lt;')
+      .replace(/>/gu, '&gt;');
+    void requestManual(markup, undefined, true);
+  });
+  function finishManual(key: string, text: string) {
+    const item = manual.get(key);
+    if (!item) return;
+    memory.set(key, text);
+    if (item.record) renderer.render(item.record, 'ready', text);
+    if (item.selection)
+      selectionOverlay.showResult(
+        deserialize(text, [], document).fragment.textContent ?? '',
+      );
+    manual.delete(key);
+  }
+  async function requestManual(
+    markup: string,
+    record?: RenderRecord,
+    selection = false,
+  ) {
+    if (!connected || !configured) {
+      if (selection) selectionOverlay.showResult('번역 설정을 확인하세요.');
+      return;
+    }
+    const epoch = generation;
+    const key = await makeCacheKey({
+      markup,
+      targetLang,
+      promptVersion: PROMPT_VERSION,
+      glossary,
+    });
+    if (disposed || generation !== epoch) return;
+    if (record) {
+      record.key = key;
+      manualBlocks.set(record.segment.block, record);
+    }
+    manual.set(key, { markup, record, selection });
+    if (memory.has(key)) finishManual(key, memory.get(key)!);
+    else post({ type: 'lookup', keys: [key] });
+  }
+  const onHover = (event: MouseEvent) => {
+    const modifier =
+      hoverModifier === 'alt'
+        ? event.altKey
+        : hoverModifier === 'control'
+          ? event.ctrlKey
+          : hoverModifier === 'shift'
+            ? event.shiftKey
+            : false;
+    if (
+      !modifier ||
+      !(event.target instanceof Element) ||
+      event.target.closest('input,textarea,select,[contenteditable],lp-t')
+    )
+      return;
+    const block = event.target.closest(
+      'p,li,h1,h2,h3,h4,h5,h6,td,th,blockquote,dt,dd',
+    );
+    if (
+      !block ||
+      (event.relatedTarget instanceof Node &&
+        block.contains(event.relatedTarget))
+    )
+      return;
+    const automatic = records.find(
+      (record) => record.segment.block === block && memory.has(record.key),
+    );
+    if (automatic) {
+      if (hiddenBlocks.has(block)) {
+        hiddenBlocks.delete(block);
+        renderer.render(automatic, 'ready', memory.get(automatic.key));
+      } else {
+        renderer.remove(automatic);
+        automatic.node = undefined;
+        hiddenBlocks.add(block);
+      }
+      return;
+    }
+    const previous = manualBlocks.get(block);
+    if (previous) {
+      renderer.remove(previous);
+      manualBlocks.delete(block);
+      manual.delete(previous.key);
+      return;
+    }
+    const segment = findSegments(block, { targetLang }).find(
+      (item) => item.block === block,
+    );
+    if (!segment) return;
+    const record = renderer.create('', segment);
+    void requestManual(segment.markup, record);
+  };
+  const onSelection = (event: MouseEvent) => {
+    if (
+      !selectionTranslation ||
+      !(event.target instanceof Element) ||
+      event.target.closest(
+        'input,textarea,select,[contenteditable],lp-t,lp-selection-overlay',
+      )
+    )
+      return;
+    const selection = document.getSelection();
+    const text = selection?.toString().trim() ?? '';
+    if (
+      !text ||
+      text.length > 2000 ||
+      !selection?.rangeCount ||
+      selection.anchorNode?.parentElement?.closest(
+        '[contenteditable],input,textarea',
+      )
+    ) {
+      selectionOverlay.hide();
+      return;
+    }
+    selectionOverlay.showButton(
+      text,
+      selection.getRangeAt(0).getBoundingClientRect(),
+    );
+  };
+  document.addEventListener('mouseover', onHover);
+  document.addEventListener('mouseup', onSelection);
   const connect = () => {
     if (disposed || !started) return;
     try {
@@ -484,6 +656,9 @@ export function startPagePipeline() {
     window.removeEventListener('pageshow', onPageshow);
     document.removeEventListener('prerenderingchange', onPrerenderingChange);
     browser.runtime.onMessage.removeListener(onPing);
+    document.removeEventListener('mouseover', onHover);
+    document.removeEventListener('mouseup', onSelection);
+    selectionOverlay.destroy();
     if (window.__lpPipelineDispose === dispose)
       delete window.__lpPipelineDispose;
   };

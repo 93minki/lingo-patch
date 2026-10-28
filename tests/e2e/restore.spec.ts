@@ -796,3 +796,149 @@ test('Next.js sticky header is skipped and short sidebar labels render compact',
     await rm(profile, { recursive: true, force: true });
   }
 });
+
+test('P6 glossary, manual translations and cache transfer', async () => {
+  const profile = await mkdtemp(path.resolve('.output/e2e-profile-'));
+  const context = await chromium.launchPersistentContext(profile, {
+    channel: 'chromium',
+    headless: true,
+    viewport: { width: 1100, height: 700 },
+    args: [
+      `--disable-extensions-except=${extension}`,
+      `--load-extension=${extension}`,
+    ],
+  });
+  try {
+    await context.route('**/*', (route) =>
+      route.request().url().startsWith(origin) ||
+      route.request().url().startsWith('chrome-extension:')
+        ? route.continue()
+        : route.abort(),
+    );
+    const worker =
+      context.serviceWorkers()[0] ??
+      (await context.waitForEvent('serviceworker'));
+    const root = worker.url().split('/').slice(0, 3).join('/');
+    const options = await context.newPage();
+    await options.goto(`${root}/options.html`);
+    await options.evaluate(() =>
+      chrome.storage.local.set({
+        'lp-glossary': { global: [], sites: {}, useDefaults: false },
+      }),
+    );
+    await options.reload();
+    const page = context.pages()[0] ?? (await context.newPage());
+    await page.goto(`${origin}/p6`);
+    await expect(page.locator('#with-props lp-t')).toContainText('[KO]');
+    await expect(page.locator('#other lp-t')).toContainText('[KO]');
+    await settled(page);
+    await page.evaluate(() => {
+      (
+        window as unknown as { otherTranslation: Element | null }
+      ).otherTranslation = document.querySelector('#other lp-t');
+    });
+    const initial = await stats();
+    await options.getByLabel('전역 용어집 추가 용어').fill('props');
+    await options
+      .getByRole('region', { name: '전역 용어집' })
+      .getByRole('button', { name: '항목 추가' })
+      .click();
+    await options.getByRole('button', { name: '용어집 저장' }).click();
+    await expect
+      .poll(async () => (await stats()).items - initial.items)
+      .toBe(1);
+    await expect(page.locator('#with-props lp-t')).toContainText('[KO]');
+    await settled(page);
+    expect(
+      await page.evaluate(
+        () =>
+          document.querySelector('#other lp-t') ===
+          (window as unknown as { otherTranslation: Element }).otherTranslation,
+      ),
+    ).toBe(true);
+    const details = (await (await fetch(`${origin}/stats`)).json()) as {
+      batches: string[][];
+      glossaryBatches: { term: string }[][];
+    };
+    expect(details.batches.at(-1)).toEqual(['These props describe behavior.']);
+    expect(details.glossaryBatches.at(-1)?.map((item) => item.term)).toEqual([
+      'props',
+    ]);
+    for (const scheme of ['light', 'dark'] as const) {
+      await options.emulateMedia({ colorScheme: scheme });
+      await options.screenshot({
+        path: `.output/p6-options-${scheme}.png`,
+        fullPage: true,
+      });
+    }
+    const download = options.waitForEvent('download');
+    await options.getByRole('button', { name: '번역 캐시 내보내기' }).click();
+    const file = await download;
+    const cachePath = path.resolve('.output/p6-cache.jsonl.gz');
+    await file.saveAs(cachePath);
+    options.once('dialog', (dialog) => void dialog.accept());
+    await options
+      .getByRole('button', { name: '전체 삭제', exact: true })
+      .click();
+    await options.locator('input[type=file]').setInputFiles(cachePath);
+    await expect(
+      options.getByText(/가져옴 \d+ · 건너뜀/).first(),
+    ).toBeVisible();
+    const beforeReload = await stats();
+    await page.reload();
+    await settled(page);
+    expect((await stats()).requests).toBe(beforeReload.requests);
+    const tabId = await options.evaluate(
+      async (url) => (await chrome.tabs.query({ url }))[0]!.id!,
+      `${origin}/p6`,
+    );
+    await options.evaluate(
+      (id) =>
+        chrome.runtime.sendMessage({
+          scope: 'lp-ui',
+          type: 'setAutoSite',
+          tabId: id,
+          enabled: false,
+        }),
+      tabId,
+    );
+    await expect(page.locator('lp-t')).toHaveCount(0);
+    await page.evaluate(() => {
+      const p = document.createElement('p');
+      p.id = 'manual';
+      p.textContent = 'Fresh manual hover paragraph.';
+      document.body.append(p);
+    });
+    const beforeHover = await stats();
+    await page.locator('#manual').dispatchEvent('mouseover');
+    expect((await stats()).requests).toBe(beforeHover.requests);
+    await page.locator('#manual').dispatchEvent('mouseover', { altKey: true });
+    await expect(page.locator('#manual lp-t')).toContainText('[KO]');
+    expect((await stats()).items - beforeHover.items).toBe(1);
+    await page.locator('#manual').dispatchEvent('mouseover', { altKey: true });
+    await expect(page.locator('#manual lp-t')).toHaveCount(0);
+    await page.evaluate(() => {
+      const text = document.querySelector('#other')!.firstChild!;
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const selection = getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      text.parentElement!.dispatchEvent(
+        new MouseEvent('mouseup', { bubbles: true }),
+      );
+    });
+    const overlay = page.locator('lp-selection-overlay');
+    await overlay.getByRole('button', { name: '선택한 텍스트 번역' }).click();
+    await expect(overlay.getByRole('dialog')).toContainText('[KO]');
+    for (const scheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.screenshot({ path: `.output/p6-selection-${scheme}.png` });
+    }
+    await page.keyboard.press('Escape');
+    await expect(overlay.getByRole('dialog')).not.toBeVisible();
+  } finally {
+    await context.close();
+    await rm(profile, { recursive: true, force: true });
+  }
+});

@@ -1,7 +1,11 @@
 import { render } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { browser } from 'wxt/browser';
-import { uiRequest, type UiRequest, type UiResponse } from '../../messaging/extension';
+import {
+  uiRequest,
+  type UiRequest,
+  type UiResponse,
+} from '../../messaging/extension';
 import { requestProviderPermission } from '../../platform/permissions';
 import {
   getSettings,
@@ -12,6 +16,13 @@ import {
 } from '../../storage/settings';
 import { KEY_LINKS, SHORTCUTS_HELP_URL } from '../../ui/key-links';
 import { SettingsSections } from '../../ui/SettingsSections';
+import { GlossaryEditor } from '../../ui/GlossaryEditor';
+import { CacheTransfer } from '../../ui/CacheTransfer';
+import {
+  emptyGlossary,
+  getGlossary,
+  setGlossary,
+} from '../../storage/glossary';
 import { commandLabel, strings } from '../../ui/strings';
 import './options.css';
 
@@ -35,7 +46,8 @@ export {
 
 export function normalizeAutoSiteHostname(raw: string): string | undefined {
   const trimmed = raw.trim().toLowerCase();
-  if (!trimmed || trimmed.includes('/') || trimmed.includes(':')) return undefined;
+  if (!trimmed || trimmed.includes('/') || trimmed.includes(':'))
+    return undefined;
   if (trimmed.includes('://')) return undefined;
   return trimmed;
 }
@@ -72,6 +84,12 @@ export type OptionsDeps = {
 
 export function OptionsApp({ deps }: { deps: OptionsDeps }) {
   const [settings, setSettings] = useState<Settings | undefined>();
+  const [glossary, setGlossaryDraft] = useState(emptyGlossary);
+  useEffect(() => {
+    void getGlossary()
+      .then(setGlossaryDraft)
+      .catch(() => {});
+  }, []);
   const [siteDraft, setSiteDraft] = useState('');
   const [deleteOrigin, setDeleteOrigin] = useState('');
   const [usage, setUsage] = useState<{ count: number; bytes: number }>();
@@ -169,7 +187,10 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
       {message ? <p class="options__success">{message}</p> : null}
 
       {showsOnboarding(settings.provider) ? (
-        <section class="options__onboarding" aria-label={strings.options.onboardingFreeTitle}>
+        <section
+          class="options__onboarding"
+          aria-label={strings.options.onboardingFreeTitle}
+        >
           <h2>{strings.options.onboardingFreeTitle}</h2>
           <ol>
             <li>{strings.options.onboardingFreeGemini1}</li>
@@ -185,7 +206,11 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
               Groq
             </a>
             {' · '}
-            <a href={KEY_LINKS.openrouter.signup} target="_blank" rel="noreferrer">
+            <a
+              href={KEY_LINKS.openrouter.signup}
+              target="_blank"
+              rel="noreferrer"
+            >
               OpenRouter
             </a>
           </p>
@@ -196,11 +221,19 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
               OpenAI
             </a>
             {' · '}
-            <a href={KEY_LINKS.anthropic.signup} target="_blank" rel="noreferrer">
+            <a
+              href={KEY_LINKS.anthropic.signup}
+              target="_blank"
+              rel="noreferrer"
+            >
               Anthropic
             </a>
             {' · '}
-            <a href={KEY_LINKS.deepseek.signup} target="_blank" rel="noreferrer">
+            <a
+              href={KEY_LINKS.deepseek.signup}
+              target="_blank"
+              rel="noreferrer"
+            >
               DeepSeek
             </a>
           </p>
@@ -236,7 +269,9 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
                 aria-label={`${strings.options.removeSite} ${site}`}
                 onClick={() =>
                   void saveGeneral({
-                    autoSites: settings.autoSites.filter((item) => item !== site),
+                    autoSites: settings.autoSites.filter(
+                      (item) => item !== site,
+                    ),
                   })
                 }
               >
@@ -279,6 +314,11 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
 
       <section aria-label={strings.options.cache}>
         <h2>{strings.options.cache}</h2>
+        <CacheTransfer
+          uiRequest={deps.uiRequest}
+          confirm={deps.confirm}
+          onComplete={() => void refreshCacheUsage()}
+        />
         {usage ? (
           <p class="options__hint">
             {strings.options.cacheUsage(
@@ -395,13 +435,59 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
             disabled={busy}
             onChange={(event) =>
               void saveGeneral({
-                skipFixedBars: (event.currentTarget as HTMLInputElement).checked,
+                skipFixedBars: (event.currentTarget as HTMLInputElement)
+                  .checked,
               })
             }
           />
           {strings.options.skipFixedBars}
         </label>
         <p class="options__notice">{strings.options.skipFixedBarsHint}</p>
+        <label for="lp-hover-modifier">호버 번역 수정키</label>
+        <select
+          id="lp-hover-modifier"
+          value={settings.hoverModifier ?? 'alt'}
+          onChange={(event) =>
+            void saveGeneral({
+              hoverModifier: (event.currentTarget as HTMLSelectElement)
+                .value as Settings['hoverModifier'],
+            })
+          }
+        >
+          <option value="alt">Alt / Option</option>
+          <option value="control">Control</option>
+          <option value="shift">Shift</option>
+          <option value="off">끄기</option>
+        </select>
+        <label class="options__row">
+          <input
+            type="checkbox"
+            checked={settings.selectionTranslation !== false}
+            onChange={(event) =>
+              void saveGeneral({
+                selectionTranslation: (event.currentTarget as HTMLInputElement)
+                  .checked,
+              })
+            }
+          />
+          선택 번역 사용
+        </label>
+      </section>
+
+      <section aria-label="용어집" id="glossary">
+        <h2>용어집</h2>
+        <GlossaryEditor value={glossary} onChange={setGlossaryDraft} />
+        <button
+          type="button"
+          class="options__btn"
+          onClick={() =>
+            void setGlossary(glossary)
+              .then(() => setMessage(strings.options.saved))
+              .catch(() => setError(strings.options.requestFailed))
+          }
+        >
+          용어집 저장
+        </button>
       </section>
 
       <section aria-label={strings.options.shortcuts}>

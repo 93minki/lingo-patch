@@ -10,6 +10,7 @@ let requests = 0,
   delayMs = 0,
   completed = 0;
 const batches = [];
+const glossaryBatches = [];
 const server = createServer(async (req, res) => {
   const json = (value) => {
     res.writeHead(200, { 'content-type': 'application/json' });
@@ -17,7 +18,14 @@ const server = createServer(async (req, res) => {
   };
   try {
     if (req.url === '/stats')
-      return json({ requests, items, lastCall, completed, batches });
+      return json({
+        requests,
+        items,
+        lastCall,
+        completed,
+        batches,
+        glossaryBatches,
+      });
     if (req.url === '/control' && req.method === 'POST') {
       const chunks = [];
       for await (const chunk of req) chunks.push(chunk);
@@ -32,6 +40,12 @@ const server = createServer(async (req, res) => {
         `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Queue fixture</title><style>p{margin:0;font:10px/1px system-ui} button{position:fixed;top:8px;left:50%;transform:translateX(-50%);width:300px;height:40px}</style></head><body><button onclick="this.dataset.clicked='yes'">Page action</button>${Array.from({ length: 170 }, (_, i) => `<p>Pending fixture paragraph number ${i} explains the stable function.</p>`).join('')}</body></html>`,
       );
     }
+    if (req.url === '/p6') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      return res.end(
+        '<!doctype html><html lang="en"><head><title>P6</title><style>p{font:16px/24px sans-serif;margin:12px}</style></head><body><p id="with-props">These props describe behavior.</p><p id="other">Unique independent paragraph.</p><input value="private input text"></body></html>',
+      );
+    }
     if (req.url === '/v1/chat/completions' && req.method === 'POST') {
       const chunks = [];
       for await (const chunk of req) chunks.push(chunk);
@@ -43,6 +57,7 @@ const server = createServer(async (req, res) => {
       items += input.items.length;
       lastCall = Date.now();
       batches.push(input.items.map((item) => item.text));
+      glossaryBatches.push(input.glossary);
       await delay(delayMs);
       completed++;
       return json({

@@ -1,6 +1,14 @@
 import type { Browser } from 'wxt/browser';
 import { TranslateQueue } from '../core/queue/translate-queue';
-import { makeCacheKey } from '../core/cache/key';
+import { makeCacheKey, matchingGlossary } from '../core/cache/key';
+import {
+  emptyGlossary,
+  effectiveGlossary,
+  type Glossary,
+} from '../storage/glossary';
+import type { GlossaryEntry } from '../core/glossary/types';
+import { validateImport } from '../storage/cache-transfer';
+import { DAY_MS } from '../core/cache/policy';
 import { PROMPT_VERSION } from '../core/prompt/version';
 import { createProvider, ProviderError } from '../providers';
 import type { CacheDb } from '../storage/cache-db';
@@ -36,13 +44,16 @@ export function createPageService(
   db: CacheDb,
   initial: Settings,
   onStatus?: (tabId: number, status?: TabStatus) => void,
+  initialGlossary: Glossary = { ...emptyGlossary(), useDefaults: false },
 ) {
   let settings = initial;
+  let glossary = initialGlossary;
   let revision = 0;
   const connections = new Map<number, Connection>();
   let queue: TranslateQueue;
   let tasks = new Map<string, Task>();
   let contexts = new Map<string, PageContext | undefined>();
+  let glossaries = new Map<string, GlossaryEntry[]>();
   const send = (connection: Connection, message: BackgroundPayload) => {
     if (connections.get(connection.tabId) !== connection) return;
     try {
@@ -63,6 +74,9 @@ export function createPageService(
       revision,
       configured: Boolean(settings.provider),
       skipFixedBars: settings.skipFixedBars,
+      glossary: effectiveGlossary(glossary, connection.hostname),
+      hoverModifier: settings.hoverModifier ?? 'alt',
+      selectionTranslation: settings.selectionTranslation ?? true,
     });
   const status = (connection: Connection): TabStatus => ({
     ...connection.stats,
@@ -78,13 +92,15 @@ export function createPageService(
     const selected = cfg ? createProvider(cfg) : undefined;
     const targetLang = settings.targetLang;
     const sourceContexts = (contexts = new Map());
+    const batchGlossaries = (glossaries = new Map());
     tasks = new Map();
     const preset = settings.preset
       ? PRESETS.find((item) => item.id === settings.preset)
       : undefined;
     queue = new TranslateQueue({
       ...(preset?.rpm ? { maxRequestsPerMinute: preset.rpm } : {}),
-      translate: async (items, signal) => {
+      groupKey: (item) => JSON.stringify(batchGlossaries.get(item.key) ?? []),
+      translate: async (items, signal, keys) => {
         if (!selected)
           throw new ProviderError('bad_request', 'Configure a provider first');
         return (
@@ -92,7 +108,7 @@ export function createPageService(
             items,
             signal,
             targetLang,
-            glossary: [],
+            glossary: batchGlossaries.get(keys[0]!) ?? [],
             context: sourceContexts.get(items[0]?.text ?? ''),
           })
         ).items;
@@ -170,6 +186,8 @@ export function createPageService(
     const currentTasks = tasks;
     const currentProvider = settings.provider;
     const currentContexts = contexts;
+    const currentGlossaries = glossaries;
+    const siteGlossary = effectiveGlossary(glossary, connection.hostname);
     const targetLang = settings.targetLang;
     for (const item of message.items) {
       void (async () => {
@@ -179,6 +197,7 @@ export function createPageService(
               markup: item.markup,
               targetLang,
               promptVersion: PROMPT_VERSION,
+              glossary: siteGlossary,
             })) !== item.key
           )
             throw new ProviderError('bad_request');
@@ -200,6 +219,10 @@ export function createPageService(
           let task = currentTasks.get(item.key);
           if (!task) {
             currentContexts.set(item.markup, message.context);
+            currentGlossaries.set(
+              item.key,
+              matchingGlossary(item.markup, siteGlossary),
+            );
             const translation = currentQueue.enqueue({
               ...item,
               tabId: connection.tabId,
@@ -224,6 +247,7 @@ export function createPageService(
               })
               .finally(() => {
                 currentContexts.delete(item.markup);
+                currentGlossaries.delete(item.key);
                 if (currentTasks.get(item.key) === tracked)
                   currentTasks.delete(item.key);
               });
@@ -252,6 +276,10 @@ export function createPageService(
     }
   };
   return {
+    updateGlossary(next: Glossary) {
+      glossary = next;
+      for (const connection of connections.values()) mode(connection);
+    },
     connect(port: Browser.runtime.Port) {
       const tabId = port.sender?.tab?.id;
       const url = port.sender?.url ?? port.sender?.tab?.url;
@@ -358,6 +386,22 @@ export function createPageService(
       send(connection, { type: 'retranslate' });
     },
     cacheUsage: () => db.usage(),
+    cacheExportBatch: (after?: string) => db.exportBatch(after),
+    async cacheImportBatch(
+      header: unknown,
+      size: unknown,
+      lines: unknown[],
+      finish = false,
+    ) {
+      const { entries, skipped } = validateImport(header, size, lines);
+      const result = await db.mergeBatch(entries);
+      if (finish)
+        await db.evict(Date.now(), {
+          ttlMs: settings.cache.ttlDays * DAY_MS,
+          maxBytes: settings.cache.maxMB * 1024 * 1024,
+        });
+      return { ...result, skipped };
+    },
     clearCache: () => db.clear(),
     deleteSiteCache: (origin: string) => db.deleteSite(origin),
     toggle(tabId: number) {

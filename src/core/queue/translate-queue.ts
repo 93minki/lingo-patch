@@ -10,7 +10,9 @@ export interface QueueOptions {
   translate: (
     items: TranslateItem[],
     signal: AbortSignal,
+    keys: string[],
   ) => Promise<TranslateItem[]>;
+  groupKey?: (item: QueueItem) => string;
   maxBatchItems?: number;
   maxBatchTokens?: number;
   debounceMs?: number;
@@ -58,6 +60,7 @@ export class TranslateQueue {
       maxMissingRetries: 2,
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       random: Math.random,
+      groupKey: () => '',
       ...opts,
     };
     for (const name of [
@@ -180,18 +183,23 @@ export class TranslateQueue {
     while (this.pending.length && this.running.size < this.opts.concurrency) {
       const jobs: Job[] = [];
       let tokens = 0;
+      const group = this.opts.groupKey(this.pending[0]!.item);
       while (this.pending.length && jobs.length < this.opts.maxBatchItems) {
-        const next = this.pending[0]!;
+        const index = this.pending.findIndex(
+          (job) => this.opts.groupKey(job.item) === group,
+        );
+        if (index < 0) break;
+        const next = this.pending[index]!;
         const size = Math.ceil(next.item.markup.length / 3);
         if (size > this.opts.maxBatchTokens) {
           if (jobs.length > 0) break;
-          this.pending.shift();
+          this.pending.splice(index, 1);
           next.state = 'running';
           jobs.push(next);
           break;
         }
         if (tokens + size > this.opts.maxBatchTokens) break;
-        this.pending.shift();
+        this.pending.splice(index, 1);
         next.state = 'running';
         jobs.push(next);
         tokens += size;
@@ -284,7 +292,11 @@ export class TranslateQueue {
           }));
           batch.sent = true;
           result = await this.abortable(
-            this.opts.translate(payload, signal),
+            this.opts.translate(
+              payload,
+              signal,
+              sentJobs.map((job) => job.item.key),
+            ),
             signal,
           );
           break;

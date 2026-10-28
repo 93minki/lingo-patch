@@ -141,6 +141,37 @@ export function createUiApi(getService: () => Promise<Service>) {
         return { ok: true, models: await createProvider(cfg).listModels() };
       }
       const service = await getService();
+      if (
+        request.type === 'cacheExportBatch' ||
+        request.type === 'cacheImportBatch'
+      ) {
+        if (!optionsPage) return { ok: false, error: 'permission' };
+        if (request.type === 'cacheExportBatch') {
+          if (
+            request.after !== undefined &&
+            (typeof request.after !== 'string' ||
+              !/^[a-f0-9]{32}$/u.test(request.after))
+          )
+            return { ok: false, error: 'bad_request' };
+          return {
+            ok: true,
+            entries: await service.cacheExportBatch(
+              request.after as string | undefined,
+            ),
+          };
+        }
+        if (!Array.isArray(request.lines))
+          return { ok: false, error: 'bad_request' };
+        return {
+          ok: true,
+          importResult: await service.cacheImportBatch(
+            request.header,
+            request.size,
+            request.lines,
+            request.finish === true,
+          ),
+        };
+      }
       if (request.type === 'cacheUsage')
         return { ok: true, usage: await service.cacheUsage() };
       if (request.type === 'clearCache' || request.type === 'deleteSiteCache') {

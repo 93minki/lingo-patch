@@ -82,6 +82,8 @@ test('normalizeSettings merges defaults for corrupted fields', () => {
     }),
   ).toEqual({
     provider: null,
+    hoverModifier: 'alt',
+    selectionTranslation: true,
     skipFixedBars: true,
     targetLang: 'ko',
     autoSites: [],

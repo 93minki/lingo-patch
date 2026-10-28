@@ -72,6 +72,55 @@ afterEach(async () => {
 });
 const keyFor = (markup: string) =>
   makeCacheKey({ markup, targetLang: 'ko', promptVersion: PROMPT_VERSION });
+test('provider batches contain only terms that occur in their items', async () => {
+  const glossary = {
+    global: [
+      { term: 'props', mode: 'keep' as const, caseSensitive: false },
+      { term: 'unused', mode: 'keep' as const, caseSensitive: false },
+    ],
+    sites: {},
+    useDefaults: false,
+  };
+  service.updateGlossary(glossary);
+  const p = port(1);
+  service.connect(p.value);
+  const texts = ['These props are useful.', 'Unrelated sentence.'];
+  const keys = await Promise.all(
+    texts.map((markup) =>
+      makeCacheKey({
+        markup,
+        targetLang: 'ko',
+        promptVersion: PROMPT_VERSION,
+        glossary: glossary.global,
+      }),
+    ),
+  );
+  p.send({
+    type: 'translate',
+    generation: 0,
+    items: texts.map((markup, index) => ({
+      key: keys[index],
+      markup,
+      priority: 2,
+    })),
+  });
+  await vi.waitFor(() =>
+    expect(
+      p.messages.filter((message) => message.type === 'translated'),
+    ).toHaveLength(2),
+  );
+  const requests = mock.translate.mock.calls.map(
+    ([request]) => request as TranslateRequest,
+  );
+  expect(
+    requests
+      .find((request) => request.items[0]?.text === texts[0])
+      ?.glossary.map((entry) => entry.term),
+  ).toEqual(['props']);
+  expect(
+    requests.find((request) => request.items[0]?.text === texts[1])?.glossary,
+  ).toEqual([]);
+});
 test('two tabs share one API request and receive persisted results without provider settings', async () => {
   const a = port(1),
     b = port(2);

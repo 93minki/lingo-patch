@@ -1,5 +1,6 @@
 import type { TabStatus } from './extension';
 import type { ProviderError } from '../providers/types';
+import type { GlossaryEntry } from '../core/glossary/types';
 export type DisplayMode = 'bilingual' | 'translation' | 'original';
 export type PageContext = { pageTitle?: string; section?: string };
 export type PageMessage = { generation: number } & (
@@ -39,6 +40,9 @@ export type BackgroundMessage = { generation: number } & (
       revision: number;
       configured: boolean;
       skipFixedBars: boolean;
+      glossary?: GlossaryEntry[];
+      hoverModifier?: 'alt' | 'control' | 'shift' | 'off';
+      selectionTranslation?: boolean;
     }
   | { type: 'toggle' }
   | { type: 'retranslate' }

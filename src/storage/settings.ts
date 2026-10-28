@@ -7,6 +7,8 @@ export interface Settings {
   preset?: PresetId;
   targetLang: string;
   skipFixedBars: boolean;
+  hoverModifier?: 'alt' | 'control' | 'shift' | 'off';
+  selectionTranslation?: boolean;
   autoSites: string[];
   displayMode: 'bilingual' | 'translation' | 'original';
   cache: { ttlDays: number; maxMB: number };
@@ -37,6 +39,8 @@ export const DEFAULT_SETTINGS: Settings = {
   provider: null,
   targetLang: 'ko',
   skipFixedBars: true,
+  hoverModifier: 'alt',
+  selectionTranslation: true,
   autoSites: [],
   displayMode: 'bilingual',
   cache: { ttlDays: 90, maxMB: 20 },
@@ -55,6 +59,8 @@ function cloneSettings(settings: Settings): Settings {
     provider: settings.provider ? { ...settings.provider } : null,
     targetLang: settings.targetLang,
     skipFixedBars: settings.skipFixedBars,
+    hoverModifier: settings.hoverModifier,
+    selectionTranslation: settings.selectionTranslation,
     autoSites: [...settings.autoSites],
     displayMode: settings.displayMode,
     cache: cloneCache(settings.cache),
@@ -155,6 +161,15 @@ export function normalizeSettings(raw: unknown): Settings {
         : DEFAULT_SETTINGS.targetLang,
     skipFixedBars:
       typeof raw.skipFixedBars === 'boolean' ? raw.skipFixedBars : true,
+    hoverModifier: ['alt', 'control', 'shift', 'off'].includes(
+      raw.hoverModifier as string,
+    )
+      ? (raw.hoverModifier as Settings['hoverModifier'])
+      : 'alt',
+    selectionTranslation:
+      typeof raw.selectionTranslation === 'boolean'
+        ? raw.selectionTranslation
+        : true,
     autoSites: parseStringArray(raw.autoSites, DEFAULT_SETTINGS.autoSites),
     displayMode: parseDisplayMode(raw.displayMode),
     cache: parseCache(raw.cache),

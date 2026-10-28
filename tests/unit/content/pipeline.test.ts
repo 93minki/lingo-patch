@@ -91,6 +91,74 @@ function inView() {
     } as unknown as IntersectionObserverEntry,
   ]);
 }
+test('hover requests only with configured modifier even when page translation is off', async () => {
+  dispose = startPagePipeline();
+  receive(mode(false));
+  await nextScan();
+  const paragraph = document.querySelector('p')!;
+  messages = [];
+  paragraph.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  await Promise.resolve();
+  expect(messages.filter((message) => message.type === 'lookup')).toHaveLength(
+    0,
+  );
+  paragraph.dispatchEvent(
+    new MouseEvent('mouseover', { bubbles: true, altKey: true }),
+  );
+  await Promise.resolve();
+  const lookup = messages.find((message) => message.type === 'lookup')!;
+  expect(lookup).toMatchObject({ keys: ['Source paragraph'] });
+  receive({
+    type: 'cached',
+    keys: ['Source paragraph'],
+    entries: [],
+    generation: lookup.generation,
+  });
+  expect(
+    messages.filter((message) => message.type === 'translate'),
+  ).toHaveLength(1);
+  receive({
+    type: 'translated',
+    key: 'Source paragraph',
+    text: '번역문',
+    generation: lookup.generation,
+  });
+  expect(paragraph.querySelector('lp-t')?.textContent).toBe('번역문');
+  paragraph.dispatchEvent(
+    new MouseEvent('mouseover', { bubbles: true, altKey: true }),
+  );
+  expect(paragraph.querySelector('lp-t')).toBeNull();
+});
+
+test('selection button ignores input and disabled setting, closes on escape', async () => {
+  dispose = startPagePipeline();
+  receive(mode(false));
+  await nextScan();
+  const input = document.createElement('input');
+  document.body.append(input);
+  input.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  const host = document.querySelector('lp-selection-overlay')!;
+  const button = host.shadowRoot!.querySelector('button')!;
+  expect(button.classList.contains('visible')).toBe(false);
+  const paragraph = document.querySelector('p')!;
+  const range = document.createRange();
+  range.selectNodeContents(paragraph);
+  range.getBoundingClientRect = () =>
+    ({ left: 0, right: 100, top: 0, bottom: 20 }) as DOMRect;
+  const selection = document.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(range);
+  paragraph.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  expect(button.classList.contains('visible')).toBe(true);
+  document.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+  );
+  expect(button.classList.contains('visible')).toBe(false);
+  receive({ ...mode(false), selectionTranslation: false });
+  paragraph.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  expect(button.classList.contains('visible')).toBe(false);
+  selection.removeAllRanges();
+});
 test('waits for enable, looks up first, requests only nearby misses and toggles without changing source', async () => {
   dispose = startPagePipeline();
   receive(mode(false));

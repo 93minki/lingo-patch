@@ -145,7 +145,10 @@ function PopupSettingsView({
         <p class="popup__message">{strings.popup.loading}</p>
       ) : null}
       {settings && settings.provider === null ? (
-        <section class="popup__free-hint" aria-label={strings.options.onboardingFreeTitle}>
+        <section
+          class="popup__free-hint"
+          aria-label={strings.options.onboardingFreeTitle}
+        >
           <p class="popup__message">
             {strings.popup.freeKeyHint}{' '}
             <a href={KEY_LINKS.gemini.signup} target="_blank" rel="noreferrer">
@@ -178,6 +181,14 @@ function PopupSettingsView({
         />
       ) : null}
       <p class="popup__footer popup__footer--advanced">
+        <button
+          type="button"
+          class="popup__btn popup__btn--link"
+          disabled={busy}
+          onClick={() => void deps.openOptionsPage()}
+        >
+          용어집 관리
+        </button>
         <button
           type="button"
           class="popup__btn popup__btn--link"
@@ -312,9 +323,7 @@ export function PopupApp({ deps }: { deps: PopupDeps }) {
       <main class="popup" aria-busy="true">
         <h1 class="popup__title">{strings.popup.title}</h1>
         <p class="popup__message">
-          {tabId === undefined
-            ? strings.popup.loading
-            : strings.popup.checking}
+          {tabId === undefined ? strings.popup.loading : strings.popup.checking}
         </p>
         <PopupSettingsLink busy={false} onOpen={openSettings} />
       </main>

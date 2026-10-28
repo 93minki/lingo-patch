@@ -1,6 +1,7 @@
 import { browser } from 'wxt/browser';
 import type { ProviderConfig, ProviderError } from '../providers/types';
 import type { DisplayMode } from './types';
+import type { CacheTransferEntry } from '../storage/cache-db';
 
 export interface TabStatus {
   available: boolean;
@@ -26,13 +27,23 @@ export type UiRequest =
   | { type: 'deleteSiteCache'; origin: string }
   | { type: 'openOptions' }
   | { type: 'setAutoSite'; tabId: number; enabled: boolean }
-  | { type: 'setDisplayMode'; displayMode: DisplayMode };
+  | { type: 'setDisplayMode'; displayMode: DisplayMode }
+  | { type: 'cacheExportBatch'; after?: string }
+  | {
+      type: 'cacheImportBatch';
+      header: unknown;
+      size: number;
+      lines: unknown[];
+      finish?: boolean;
+    };
 export interface UiResponse {
   ok: boolean;
   error?: ProviderError['kind'] | 'permission' | 'unavailable';
   status?: TabStatus;
   models?: string[];
   usage?: { count: number; bytes: number };
+  entries?: CacheTransferEntry[];
+  importResult?: { imported: number; skipped: number; kept: number };
 }
 export function uiRequest(request: UiRequest): Promise<UiResponse> {
   return browser.runtime.sendMessage({ scope: 'lp-ui', ...request });

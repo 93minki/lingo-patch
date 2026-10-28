@@ -66,11 +66,18 @@ export function glossaryFingerprint(
   markup: string,
   entries: GlossaryEntry[],
 ): string {
-  const text = searchTextFromMarkup(markup);
-  const matched = entries.filter((entry) => termAppears(text, entry));
+  const matched = matchingGlossary(markup, entries);
   if (matched.length === 0) return '';
   matched.sort(compareEntries);
   return matched.map(encodeEntry).join('\n');
+}
+
+export function matchingGlossary(
+  markup: string,
+  entries: GlossaryEntry[],
+): GlossaryEntry[] {
+  const text = searchTextFromMarkup(markup);
+  return entries.filter((entry) => termAppears(text, entry));
 }
 
 async function sha256Hex32(payload: string): Promise<string> {

@@ -9,6 +9,7 @@ import {
 } from '../storage/settings';
 import { createPageService } from '../messaging/service';
 import { createUiApi } from '../messaging/api';
+import { getGlossary, onGlossaryChanged } from '../storage/glossary';
 
 export default defineBackground(() => {
   const e2ePorts = new Set<ReturnType<typeof browser.runtime.connect>>();
@@ -42,6 +43,7 @@ export default defineBackground(() => {
             })
             .catch(() => {});
         },
+        await getGlossary(),
       ),
     ));
   const uiApi = createUiApi(getService);
@@ -75,6 +77,9 @@ export default defineBackground(() => {
       void service
         .then((current) => current.update(settings))
         .catch(() => console.error('Unable to update translation service'));
+  });
+  onGlossaryChanged((value) => {
+    if (service) void service.then((current) => current.updateGlossary(value));
   });
   browser.runtime.onConnect.addListener((port) => {
     if (port.name !== 'lp-page') return;

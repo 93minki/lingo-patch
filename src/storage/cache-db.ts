@@ -14,6 +14,14 @@ export interface CachedSegment {
   lastAccess: number;
   bytes: number;
 }
+export type CacheTransferEntry = {
+  key: string;
+  translated: string;
+  srcLang?: string;
+  model: string;
+  provider: string;
+  createdAt: number;
+};
 
 type WriteEntry = {
   key: string;
@@ -33,6 +41,10 @@ export interface CacheDb {
   deleteSite(origin: string): Promise<number>;
   clear(): Promise<void>;
   close(): void;
+  exportBatch(after?: string): Promise<CacheTransferEntry[]>;
+  mergeBatch(
+    entries: CacheTransferEntry[],
+  ): Promise<{ imported: number; kept: number }>;
 }
 
 interface CacheSchema extends DBSchema {
@@ -85,6 +97,56 @@ export async function openCacheDb(name = 'lingo-patch'): Promise<CacheDb> {
   }
 
   return {
+    exportBatch(after) {
+      return transaction(['segments'], 'readonly', async (tx) => {
+        const entries: CacheTransferEntry[] = [];
+        for (
+          let cursor = await tx
+            .objectStore('segments')
+            .openCursor(
+              after ? IDBKeyRange.lowerBound(after, true) : undefined,
+            );
+          cursor && entries.length < 500;
+          cursor = await cursor.continue()
+        ) {
+          const { translated, srcLang, model, provider, createdAt } =
+            cursor.value;
+          entries.push({
+            key: cursor.key,
+            translated,
+            ...(srcLang === undefined ? {} : { srcLang }),
+            model,
+            provider,
+            createdAt,
+          });
+        }
+        return entries;
+      });
+    },
+    mergeBatch(entries) {
+      return transaction(['segments'], 'readwrite', async (tx) => {
+        let imported = 0,
+          kept = 0;
+        const store = tx.objectStore('segments');
+        for (const { key, ...value } of entries) {
+          const old = await store.get(key);
+          if (old && old.createdAt >= value.createdAt) {
+            kept++;
+            continue;
+          }
+          await store.put(
+            {
+              ...value,
+              lastAccess: Date.now(),
+              bytes: estimateBytes(key, value.translated),
+            },
+            key,
+          );
+          imported++;
+        }
+        return { imported, kept };
+      });
+    },
     getMany(keys, now = Date.now()) {
       return transaction(['segments'], 'readwrite', async (tx) => {
         const store = tx.objectStore('segments');

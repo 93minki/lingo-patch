@@ -40,6 +40,10 @@ vi.mock('wxt/utils/define-background', () => ({
   defineBackground: (main: () => void) => ({ main }),
 }));
 vi.mock('../../../src/storage/cache-db', () => ({ openCacheDb: mocks.open }));
+vi.mock('../../../src/storage/glossary', () => ({
+  getGlossary: async () => ({ global: [], sites: {}, useDefaults: false }),
+  onGlossaryChanged: vi.fn(),
+}));
 vi.mock('../../../src/storage/settings', () => ({
   getSettings: mocks.getSettings,
   onSettingsChanged: mocks.settingsChanged,
