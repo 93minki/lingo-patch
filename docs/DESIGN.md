@@ -202,6 +202,11 @@ interface TranslationProvider {
 - `browser.storage.local`에 평문으로 저장 (개인 사용 전제). 옵션 화면에 이 사실을 명시
 - 요청 권한: 기본 제공자 도메인은 `host_permissions`에 넣고, 사용자 지정 base URL은 `optional_host_permissions`로 그때그때 요청
 
+### 7.4.1 키 보관 결정 (2026-10-28)
+- 키는 일반 설정(`lp-settings`)과 분리한 별도 항목에 보관하고, content script 코드가 그 항목을 읽지 않음을 테스트로 보장한다
+- 옵션 화면과 README에 제공자 쪽 피해 한도 설정 안내(OpenAI 프로젝트 키·월 한도, Anthropic 워크스페이스 지출 한도, Gemini 키 API 제한)를 적는다
+- 세션 전용 저장(브라우저 종료 시 삭제)과 비밀번호 잠금은 **하지 않는다** (매번 입력하는 불편이 이득보다 큼)
+
 ### 7.5 모델 목록
 - 제공자별로 현행 상위 모델 3개를 `src/providers/models.ts`에 고정 목록으로 둔다. 최상위 고가 모델은 넣지 않는다
 - 키를 넣으면 그 제공자의 3개 모델이 선택지로 뜨고, 사용자가 하나를 고른다. 키를 넣을 때 가벼운 확인 요청을 보내 키가 유효한지 검사
