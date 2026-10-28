@@ -226,6 +226,28 @@ test('SPA reset rejects stale results and reconnect scans again', async () => {
   history.replaceState({}, '', '/');
 });
 
+test('hash-only URL changes keep rendered translations', async () => {
+  dispose = startPagePipeline();
+  receive(mode());
+  await nextScan();
+  const generation = messages.at(-1)!.generation;
+  receive({
+    type: 'cached',
+    entries: [{ key: 'Source paragraph', text: '원문 문단' }],
+    keys: ['Source paragraph'],
+    generation,
+  });
+  const node = document.querySelector('lp-t');
+  expect(node).not.toBeNull();
+  const resets = messages.filter((m) => m.type === 'reset').length;
+  history.replaceState({}, '', '#section-two');
+  window.dispatchEvent(new Event('popstate'));
+  await vi.advanceTimersByTimeAsync(550);
+  expect(messages.filter((m) => m.type === 'reset')).toHaveLength(resets);
+  expect(document.querySelector('lp-t')).toBe(node);
+  history.replaceState({}, '', '/');
+});
+
 test('reconnect keeps rendered nodes, resynchronizes and retries interrupted requests', async () => {
   document.body.innerHTML = '<p>Source paragraph</p><p>Another paragraph</p>';
   const clear = vi.spyOn(SegmentRenderer.prototype, 'clear');

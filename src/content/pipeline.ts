@@ -41,7 +41,9 @@ export function startPagePipeline() {
     targetLang = 'ko',
     lastRevision = -1,
     lastAuto: boolean | undefined;
-  let href = location.href;
+  // Hash-only changes (docs sites update #section while scrolling) are the same page.
+  const pageUrl = () => location.origin + location.pathname + location.search;
+  let href = pageUrl();
   let scanTimer: ReturnType<typeof setTimeout> | undefined;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let intersection: IntersectionObserver | undefined;
@@ -445,8 +447,8 @@ export function startPagePipeline() {
     return true;
   };
   const navigate = () => {
-    if (location.href !== href) {
-      href = location.href;
+    if (pageUrl() !== href) {
+      href = pageUrl();
       reset();
     }
   };
