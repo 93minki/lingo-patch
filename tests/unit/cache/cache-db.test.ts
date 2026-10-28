@@ -183,3 +183,42 @@ test('aborts entire batch on cloning failure instead of committing earlier write
   ).rejects.toThrow();
   expect(await cache.usage()).toEqual({ count: 0, bytes: 0 });
 });
+test('deleteMany removes only selected segment keys and ignores missing keys', async () => {
+  await cache.putMany(
+    [
+      { key: 'a', value: value('A') },
+      { key: 'b', value: value('B') },
+      { key: 'c', value: value('C') },
+    ],
+    100,
+  );
+  await cache.deleteMany(['a', 'missing', 'c', 'a']);
+  expect([...(await cache.getMany(['a', 'b', 'c'], 100)).keys()]).toEqual([
+    'b',
+  ]);
+  expect(await cache.usage()).toEqual({
+    count: 1,
+    bytes: estimateBytes('b', 'B'),
+  });
+});
+test('deleteMany leaves page acceleration references unchanged for shared keys', async () => {
+  await cache.putMany(
+    [
+      { key: 'shared', value: value('shared') },
+      { key: 'solo', value: value('solo') },
+    ],
+    100,
+  );
+  await cache.putPage('https://site.test/a', ['shared', 'solo'], 100);
+  await cache.putPage('https://site.test/b', ['shared'], 100);
+  await cache.deleteMany(['shared']);
+  expect(await cache.getPage('https://site.test/a')).toEqual(['shared', 'solo']);
+  expect(await cache.getPage('https://site.test/b')).toEqual(['shared']);
+  expect([...(await cache.getMany(['shared', 'solo'], 100)).keys()]).toEqual([
+    'solo',
+  ]);
+  expect(await cache.usage()).toEqual({
+    count: 1,
+    bytes: estimateBytes('solo', 'solo'),
+  });
+});

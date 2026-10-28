@@ -210,7 +210,27 @@ test('cancelTab rejects pending work but retains a shared key requested by anoth
   await expect(shared).resolves.toBe('translated:shared');
   expect(translate.mock.calls[0]![0]).toEqual([{ id: '0', text: 'shared' }]);
 });
-test('aborts an all-canceled active batch, releases its slot, and allows the same key again', async () => {
+test('keeps an in-flight API batch after cancelTab and still resolves for cache hooks', async () => {
+  let resolve!: (items: TranslateItem[]) => void;
+  let signal: AbortSignal | undefined;
+  const translate = vi.fn((_: TranslateItem[], passed: AbortSignal) => {
+    signal = passed;
+    return new Promise<TranslateItem[]>((yes) => {
+      resolve = yes;
+    });
+  });
+  const onStored = vi.fn();
+  const queue = new TranslateQueue({ translate, concurrency: 1 });
+  const inflight = queue.enqueue(item('same'));
+  void inflight.then(onStored);
+  await tick();
+  queue.cancelTab(1);
+  expect(signal!.aborted).toBe(false);
+  resolve([{ id: '0', text: 'same' }]);
+  await expect(inflight).resolves.toBe('same');
+  expect(onStored).toHaveBeenCalledWith('same');
+});
+test('cancelTab with abortRunning aborts a sent batch with no remaining subscribers', async () => {
   let signal: AbortSignal | undefined;
   const translate = vi.fn((_: TranslateItem[], passed: AbortSignal) => {
     signal = passed;
@@ -221,7 +241,7 @@ test('aborts an all-canceled active batch, releases its slot, and allows the sam
     kind: 'aborted',
   });
   await tick();
-  queue.cancelTab(1);
+  queue.cancelTab(1, true);
   await canceled;
   expect(signal!.aborted).toBe(true);
   translate.mockImplementation(echo);
@@ -229,7 +249,7 @@ test('aborts an all-canceled active batch, releases its slot, and allows the sam
   await tick();
   await expect(again).resolves.toBe('translated:same');
 });
-test('does not abort mixed-tab active batches and resolves the remaining tab', async () => {
+test('does not abort mixed-tab sent batches and resolves remaining subscribers', async () => {
   let resolve!: (items: TranslateItem[]) => void;
   let signal: AbortSignal | undefined;
   const queue = new TranslateQueue({
@@ -240,33 +260,44 @@ test('does not abort mixed-tab active batches and resolves the remaining tab', a
       });
     },
   });
-  const canceled = expect(queue.enqueue(item('a', 0, 1))).rejects.toMatchObject(
-    { kind: 'aborted' },
-  );
+  const detached = queue.enqueue(item('a', 0, 1));
   const retained = queue.enqueue(item('b', 0, 2));
   await tick();
   queue.cancelTab(1);
-  await canceled;
   expect(signal!.aborted).toBe(false);
   resolve([
     { id: '0', text: 'ignored' },
     { id: '1', text: 'retained' },
   ]);
+  await expect(detached).resolves.toBe('ignored');
   await expect(retained).resolves.toBe('retained');
 });
-test('can cancel during backoff without issuing another API request', async () => {
+test('continues a sent batch through backoff after cancelTab for cache completion', async () => {
   const translate = vi
     .fn(echo)
     .mockRejectedValueOnce(new ProviderError('server'));
   const queue = new TranslateQueue({ translate });
-  const canceled = expect(queue.enqueue(item('a'))).rejects.toMatchObject({
+  const inflight = queue.enqueue(item('a'));
+  await tick();
+  expect(translate).toHaveBeenCalledOnce();
+  queue.cancelTab(1);
+  await tick(10000);
+  expect(translate).toHaveBeenCalledTimes(2);
+  await expect(inflight).resolves.toBe('translated:a');
+});
+test('cancelTab skips pending work before debounce without calling translate', async () => {
+  const translate = vi.fn(echo);
+  const queue = new TranslateQueue({ translate });
+  const canceled = expect(queue.enqueue(item('wait'))).rejects.toMatchObject({
     kind: 'aborted',
   });
-  await tick();
+  const kept = queue.enqueue(item('kept', 0, 2));
   queue.cancelTab(1);
   await canceled;
-  await tick(10000);
+  await tick();
+  await expect(kept).resolves.toBe('translated:kept');
   expect(translate).toHaveBeenCalledOnce();
+  expect(translate.mock.calls[0]![0]).toEqual([{ id: '0', text: 'kept' }]);
 });
 test('does not apply RPM limits when maxRequestsPerMinute is omitted', async () => {
   const translate = vi.fn(echo);
@@ -367,7 +398,7 @@ test('cancels an RPM wait for one tab without blocking another tab after the win
   expect(translate).toHaveBeenCalledTimes(2);
 });
 
-test('aborts while waiting for an RPM slot without extra translate calls', async () => {
+test('aborts only the RPM waiter on cancelTab while keeping an in-flight batch', async () => {
   const translate = vi.fn(() => new Promise<TranslateItem[]>(() => {}));
   const queue = new TranslateQueue({
     translate,
@@ -382,8 +413,60 @@ test('aborts while waiting for an RPM slot without extra translate calls', async
     kind: 'aborted',
   });
   queue.cancelTab(1);
-  await Promise.allSettled([hold, waiting]);
+  await waiting;
   await tick(120_000);
+  expect(translate).toHaveBeenCalledTimes(1);
+  void hold;
+});
+test('maps API ids using the sent batch snapshot after partial abortRunning cancel', async () => {
+  let resolve!: (items: TranslateItem[]) => void;
+  const queue = new TranslateQueue({
+    translate: () =>
+      new Promise<TranslateItem[]>((yes) => {
+        resolve = yes;
+      }),
+  });
+  const canceled = expect(queue.enqueue(item('a', 0, 1))).rejects.toMatchObject({
+    kind: 'aborted',
+  });
+  const retained = queue.enqueue(item('b', 0, 2));
+  await tick();
+  queue.cancelTab(1, true);
+  await canceled;
+  resolve([
+    { id: '0', text: 'ignored' },
+    { id: '1', text: 'retained' },
+  ]);
+  await expect(retained).resolves.toBe('retained');
+});
+test('abortRunning keeps a shared in-flight key for another tab', async () => {
+  let resolve!: (items: TranslateItem[]) => void;
+  const queue = new TranslateQueue({
+    translate: () =>
+      new Promise<TranslateItem[]>((yes) => {
+        resolve = yes;
+      }),
+  });
+  const shared = queue.enqueue(item('shared', 0, 1));
+  expect(queue.enqueue(item('shared', 0, 2))).toBe(shared);
+  await tick();
+  queue.cancelTab(1, true);
+  resolve([{ id: '0', text: 'shared' }]);
+  await expect(shared).resolves.toBe('shared');
+});
+test('abortAll rejects every pending and running job', async () => {
+  const translate = vi.fn(() => new Promise<TranslateItem[]>(() => {}));
+  const queue = new TranslateQueue({ translate, concurrency: 2 });
+  const pending = expect(queue.enqueue(item('pending'))).rejects.toMatchObject({
+    kind: 'aborted',
+  });
+  const running = expect(queue.enqueue(item('running'))).rejects.toMatchObject({
+    kind: 'aborted',
+  });
+  await tick();
+  queue.abortAll();
+  await Promise.allSettled([pending, running]);
+  await tick(5000);
   expect(translate).toHaveBeenCalledTimes(1);
 });
 

@@ -9,7 +9,10 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { platform } from 'node:os';
 import { Window } from 'happy-dom';
+import type { Settings } from '../../src/storage/settings';
 import { findSegments } from '../../src/core/segment';
+
+declare const chrome: typeof import('wxt/browser').browser;
 
 const origin = 'http://127.0.0.1:4174';
 const extension = path.resolve('.output/chrome-mv3-e2e');
@@ -226,6 +229,274 @@ test('persistent paragraph cache, original DOM, lazy requests and keyboard modes
     });
   } finally {
     await context?.close();
+    await rm(profile, { recursive: true, force: true });
+  }
+});
+
+test('delayed requests finish after navigation, progress passes clicks, and retranslation refreshes page keys', async () => {
+  const profile = await mkdtemp(path.resolve('.output/e2e-profile-'));
+  const context = await chromium.launchPersistentContext(profile, {
+    channel: 'chromium',
+    headless: true,
+    viewport: { width: 1100, height: 700 },
+    args: [
+      `--disable-extensions-except=${extension}`,
+      `--load-extension=${extension}`,
+    ],
+  });
+  const control = (delayMs: number) =>
+    fetch(`${origin}/control`, {
+      method: 'POST',
+      body: JSON.stringify({ delayMs }),
+    });
+  try {
+    await context.route('**/*', (route) =>
+      route.request().url().startsWith(origin) ||
+      route.request().url().startsWith('chrome-extension:')
+        ? route.continue()
+        : route.abort(),
+    );
+    const page = context.pages()[0] ?? (await context.newPage());
+    const initial = await stats();
+    await control(2000);
+    await page.goto(`${origin}/pending-a`);
+    const progress = page.locator('lp-progress').locator('.pill');
+    await expect(progress).toBeVisible();
+    await expect(progress).toContainText('번역 중');
+    const point = await progress.boundingBox();
+    expect(
+      await page.evaluate(
+        ({ x, y }) => document.elementFromPoint(x, y)?.localName,
+        { x: point!.x + point!.width / 2, y: point!.y + point!.height / 2 },
+      ),
+    ).toBe('button');
+    await page.mouse.click(
+      point!.x + point!.width / 2,
+      point!.y + point!.height / 2,
+    );
+    await expect(
+      page.getByRole('button', { name: 'Page action', exact: true }),
+    ).toHaveAttribute('data-clicked', 'yes');
+    await expect
+      .poll(async () => (await stats()).requests - initial.requests)
+      .toBe(3);
+    const sent = await stats();
+    expect(sent.items - initial.items).toBe(120);
+    const worker =
+      context.serviceWorkers()[0] ??
+      (await context.waitForEvent('serviceworker'));
+    const tabId = await worker.evaluate(
+      async () =>
+        (await chrome.tabs.query({ active: true, currentWindow: true }))[0]!
+          .id!,
+    );
+    expect(
+      await worker.evaluate(
+        (id) => chrome.action.getBadgeText({ tabId: id }),
+        tabId,
+      ),
+    ).toBe('170');
+    await page.goto(`${origin}/b`);
+    await control(0);
+    await settled(page);
+    const afterB = await stats();
+    await page.goBack();
+    await expect(page.locator('lp-t[data-lp-state="ready"]')).toHaveCount(170);
+    await settled(page);
+    const restored = await stats();
+    expect(restored.items - afterB.items).toBe(50);
+    expect(restored.requests - afterB.requests).toBe(2);
+    expect(
+      await worker.evaluate(
+        (id) => chrome.action.getBadgeText({ tabId: id }),
+        tabId,
+      ),
+    ).toBe('');
+    const ui = await context.newPage();
+    await ui.goto(
+      `${worker.url().split('/').slice(0, 3).join('/')}/options.html`,
+    );
+    const response = await ui.evaluate(
+      (id) =>
+        chrome.runtime.sendMessage({
+          scope: 'lp-ui',
+          type: 'retranslatePage',
+          tabId: id,
+        }),
+      tabId,
+    );
+    expect(response).toEqual({ ok: true });
+    await expect
+      .poll(async () => (await stats()).items - restored.items)
+      .toBe(170);
+    await expect(page.locator('lp-t[data-lp-state="ready"]')).toHaveCount(170);
+    await settled(page);
+    const refreshed = await stats();
+    expect(refreshed.requests - restored.requests).toBe(5);
+    console.log(
+      JSON.stringify({
+        p5ApiCalls: {
+          initialA: sent.requests - initial.requests,
+          initialB: afterB.requests - sent.requests,
+          returnA: restored.requests - afterB.requests,
+          retranslate: refreshed.requests - restored.requests,
+        },
+        p5Items: { initialSent: 120, returnUnsent: 50, retranslate: 170 },
+      }),
+    );
+  } finally {
+    await control(0);
+    await context.close();
+    await rm(profile, { recursive: true, force: true });
+  }
+});
+
+test('options and popup controls use the real background API without exposing keys', async () => {
+  const profile = await mkdtemp(path.resolve('.output/e2e-profile-'));
+  const context = await chromium.launchPersistentContext(profile, {
+    channel: 'chromium',
+    headless: true,
+    viewport: { width: 1000, height: 800 },
+    args: [
+      `--disable-extensions-except=${extension}`,
+      `--load-extension=${extension}`,
+    ],
+  });
+  try {
+    await context.route('**/*', (route) =>
+      route.request().url().startsWith(origin) ||
+      route.request().url().startsWith('chrome-extension:')
+        ? route.continue()
+        : route.abort(),
+    );
+    const worker =
+      context.serviceWorkers()[0] ??
+      (await context.waitForEvent('serviceworker'));
+    await expect
+      .poll(() =>
+        worker.evaluate(
+          async () =>
+            (
+              (await chrome.storage.local.get('lp-settings'))['lp-settings'] as
+                Settings | undefined
+            )?.provider?.model,
+        ),
+      )
+      .toBe('lingo-patch-e2e-mock');
+    await worker.evaluate(async () => {
+      const value = (await chrome.storage.local.get('lp-settings'))[
+        'lp-settings'
+      ] as Settings;
+      await chrome.storage.local.set({
+        'lp-settings': { ...value, provider: null },
+      });
+    });
+    const root = worker.url().split('/').slice(0, 3).join('/');
+    const options = await context.newPage();
+    await options.goto(`${root}/options.html`);
+    await expect(
+      options.getByRole('heading', { name: '무료로 시작', exact: true }),
+    ).toBeVisible();
+    await expect(options.getByLabel('API 키', { exact: true })).toHaveAttribute(
+      'type',
+      'password',
+    );
+    await expect(options.locator('.options__onboarding a')).toHaveCount(6);
+    await options.screenshot({
+      path: '.output/ui-options-onboarding.png',
+      fullPage: true,
+    });
+    await options
+      .getByRole('combobox', { name: '번역 엔진', exact: true })
+      .selectOption('custom');
+    await options.getByLabel('Base URL', { exact: true }).fill(`${origin}/v1`);
+    await options
+      .getByLabel('모델', { exact: true })
+      .fill('lingo-patch-e2e-mock');
+    await options
+      .getByLabel('API 키', { exact: true })
+      .fill('local-fake-secret');
+    await options.getByRole('button', { name: '키 확인', exact: true }).click();
+    await expect(
+      options.getByText('키가 확인되었습니다', { exact: true }),
+    ).toBeVisible();
+    await options.getByRole('button', { name: '저장', exact: true }).click();
+    await expect(
+      options.getByText('저장했습니다', { exact: true }),
+    ).toBeVisible();
+    await options.getByLabel('API 키', { exact: true }).fill('unsaved-draft');
+    await options.getByLabel('목표 언어', { exact: true }).selectOption('en');
+    await expect(options.getByLabel('API 키', { exact: true })).toHaveValue(
+      'unsaved-draft',
+    );
+    await options.getByLabel('목표 언어', { exact: true }).selectOption('ko');
+    const page = await context.newPage();
+    await page.goto(`${origin}/a`);
+    await settled(page);
+    const tabId = await worker.evaluate(
+      async () =>
+        (await chrome.tabs.query({ active: true, currentWindow: true }))[0]!
+          .id!,
+    );
+    const popup = await context.newPage();
+    // A standalone popup tab emulates the toolbar popup's active-page lookup.
+    await popup.addInitScript((id) => {
+      chrome.tabs.query = (() =>
+        Promise.resolve([{ id }])) as unknown as typeof chrome.tabs.query;
+    }, tabId);
+    await popup.goto(`${root}/popup.html`);
+    await expect(
+      popup.getByRole('button', { name: '번역 끄기', exact: true }),
+    ).toBeVisible();
+    expect(await popup.locator('body').innerText()).not.toContain(
+      'local-fake-secret',
+    );
+    await popup.screenshot({ path: '.output/ui-popup.png', fullPage: true });
+    await popup.getByRole('button', { name: '원문만', exact: true }).click();
+    await expect(page.locator('html')).toHaveAttribute(
+      'data-lp-mode',
+      'original',
+    );
+    await popup.getByRole('button', { name: '이중 언어', exact: true }).click();
+    await popup.getByRole('button', { name: '번역 끄기', exact: true }).click();
+    await expect(page.locator('lp-t')).toHaveCount(0);
+    await popup.getByRole('button', { name: '지금 번역', exact: true }).click();
+    await settled(page);
+    const before = await stats();
+    const tabState = await popup.evaluate(
+      (id) =>
+        chrome.runtime.sendMessage({
+          scope: 'lp-ui',
+          type: 'getTabStatus',
+          tabId: id,
+        }),
+      tabId,
+    );
+    const expectedItems = tabState.status.total as number;
+    expect(expectedItems).toBe(102);
+    popup.once('dialog', (dialog) => {
+      expect(dialog.message()).toContain(`${expectedItems}개`);
+      return dialog.accept();
+    });
+    await popup
+      .getByRole('button', { name: '이 페이지 다시 번역', exact: true })
+      .click();
+    await expect
+      .poll(async () => (await stats()).items - before.items)
+      .toBe(expectedItems);
+    await expect(page.locator('lp-t[data-lp-state="ready"]')).toHaveCount(122);
+    await settled(page);
+    const after = await stats();
+    console.log(
+      JSON.stringify({
+        p5UiRetranslate: {
+          requests: after.requests - before.requests,
+          items: after.items - before.items,
+        },
+      }),
+    );
+  } finally {
+    await context.close();
     await rm(profile, { recursive: true, force: true });
   }
 });

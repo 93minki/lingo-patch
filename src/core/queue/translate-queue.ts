@@ -34,6 +34,7 @@ interface Job {
 interface Batch {
   jobs: Job[];
   controller: AbortController;
+  sent: boolean;
 }
 
 const RATE_WINDOW_MS = 60_000;
@@ -112,15 +113,47 @@ export class TranslateQueue {
     this.schedule();
     return promise;
   }
-  cancelTab(tabId: number): void {
-    for (const job of this.jobs.values()) {
-      job.tabs.delete(tabId);
-      if (!job.tabs.size) this.finish(job, new ProviderError('aborted'));
-    }
+  cancelTab(tabId: number, abortRunning = false): void {
+    for (const job of this.jobs.values()) job.tabs.delete(tabId);
+    this.pending = this.pending.filter((job) => {
+      if (job.state === 'pending' && job.tabs.size === 0) {
+        this.finish(job, new ProviderError('aborted'));
+        return false;
+      }
+      return true;
+    });
     for (const batch of this.running) {
-      if (batch.jobs.every((job) => job.state === 'done'))
-        batch.controller.abort();
+      for (const job of batch.jobs) {
+        if (job.state === 'done' || job.tabs.size > 0) continue;
+        if (abortRunning || !batch.sent)
+          this.finish(job, new ProviderError('aborted'));
+      }
+      this.syncRunningBatch(batch, abortRunning);
     }
+  }
+  abortAll(): void {
+    if (this.timer !== undefined) {
+      clearTimeout(this.timer);
+      this.timer = undefined;
+    }
+    this.pending = [];
+    for (const job of this.jobs.values()) {
+      if (job.state !== 'done') this.finish(job, new ProviderError('aborted'));
+    }
+    for (const batch of this.running) batch.controller.abort();
+  }
+  private syncRunningBatch(batch: Batch, abortRunning: boolean): void {
+    const active = batch.jobs.filter((job) => job.state !== 'done');
+    if (!active.length) {
+      batch.controller.abort();
+      return;
+    }
+    if (batch.sent) {
+      if (abortRunning && active.every((job) => job.tabs.size === 0))
+        batch.controller.abort();
+      return;
+    }
+    if (active.every((job) => job.tabs.size === 0)) batch.controller.abort();
   }
   private finish(job: Job, result: string | ProviderError): void {
     if (job.state === 'done') return;
@@ -164,7 +197,11 @@ export class TranslateQueue {
         tokens += size;
       }
       if (!jobs.length) break;
-      const batch = { jobs, controller: new AbortController() };
+      const batch: Batch = {
+        jobs,
+        controller: new AbortController(),
+        sent: false,
+      };
       this.running.add(batch);
       void this.run(batch).finally(() => {
         this.running.delete(batch);
@@ -224,21 +261,30 @@ export class TranslateQueue {
       signal.removeEventListener('abort', abort);
     }
   }
+  private activeJobs(batch: Batch): Job[] {
+    return batch.jobs.filter((job) => job.state !== 'done');
+  }
   private async run(batch: Batch): Promise<void> {
     const { signal } = batch.controller;
-    const items = batch.jobs.map((job, id) => ({
-      id: String(id),
-      text: job.item.markup,
-    }));
     try {
       let result: TranslateItem[] = [];
+      let sentJobs: Job[] | undefined;
       for (let attempt = 1; attempt <= this.opts.maxAttempts; attempt++) {
+        if (!this.activeJobs(batch).length) return;
         try {
           if (signal.aborted) throw new ProviderError('aborted');
           await this.acquireRateSlot(signal);
           if (signal.aborted) throw new ProviderError('aborted');
+          const active = this.activeJobs(batch);
+          if (!active.length) return;
+          sentJobs = active.slice();
+          const payload = sentJobs.map((job, id) => ({
+            id: String(id),
+            text: job.item.markup,
+          }));
+          batch.sent = true;
           result = await this.abortable(
-            this.opts.translate(items, signal),
+            this.opts.translate(payload, signal),
             signal,
           );
           break;
@@ -259,8 +305,13 @@ export class TranslateQueue {
           await this.abortable(this.opts.sleep(delay), signal);
         }
       }
-      if (!Array.isArray(result)) throw new ProviderError('invalid_response');
+      if (!Array.isArray(result) || !sentJobs?.length)
+        throw new ProviderError('invalid_response');
       const translated = new Map<string, string>();
+      const items = sentJobs.map((job, id) => ({
+        id: String(id),
+        text: job.item.markup,
+      }));
       for (const item of result) {
         if (
           !item ||
@@ -272,7 +323,7 @@ export class TranslateQueue {
           throw new ProviderError('invalid_response');
         translated.set(item.id, item.text);
       }
-      batch.jobs.forEach((job, id) => {
+      sentJobs.forEach((job, id) => {
         if (job.state === 'done') return;
         const text = translated.get(String(id));
         if (text !== undefined) this.finish(job, text);
@@ -295,7 +346,10 @@ export class TranslateQueue {
         : error instanceof ProviderError
           ? error
           : new ProviderError('network');
-      for (const job of batch.jobs) this.finish(job, failure);
+      for (const job of batch.jobs) {
+        if (job.state === 'done') continue;
+        this.finish(job, failure);
+      }
     }
   }
 }

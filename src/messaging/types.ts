@@ -1,3 +1,4 @@
+import type { TabStatus } from './extension';
 import type { ProviderError } from '../providers/types';
 export type DisplayMode = 'bilingual' | 'translation' | 'original';
 export type PageContext = { pageTitle?: string; section?: string };
@@ -9,7 +10,17 @@ export type PageMessage = { generation: number } & (
       context?: PageContext;
     }
   | { type: 'page'; pageId: string; keys: string[]; prefetch?: boolean }
-  | { type: 'reset' }
+  | { type: 'reset'; stop?: boolean }
+  | { type: 'openOptions' }
+  | {
+      type: 'status';
+      enabled: boolean;
+      total: number;
+      restored: number;
+      translated: number;
+      pending: number;
+      error?: ProviderError['kind'] | 'unconfigured';
+    }
 );
 export type BackgroundMessage = { generation: number } & (
   | {
@@ -26,8 +37,12 @@ export type BackgroundMessage = { generation: number } & (
       targetLang: string;
       autoEnabled: boolean;
       revision: number;
+      configured: boolean;
     }
   | { type: 'toggle' }
+  | { type: 'retranslate' }
+  | { type: 'inspect' }
+  | { type: 'status'; status: TabStatus }
 );
 type WithoutGeneration<T> = T extends { generation: number }
   ? Omit<T, 'generation'>
@@ -56,7 +71,28 @@ export function isPageMessage(value: unknown): value is PageMessage {
     return false;
   switch (value.type) {
     case 'reset':
+      return value.stop === undefined || typeof value.stop === 'boolean';
+    case 'openOptions':
       return true;
+    case 'status':
+      return (
+        typeof value.enabled === 'boolean' &&
+        ['total', 'restored', 'translated', 'pending'].every(
+          (key) =>
+            Number.isSafeInteger(value[key]) && (value[key] as number) >= 0,
+        ) &&
+        (value.error === undefined ||
+          [
+            'auth',
+            'rate_limit',
+            'server',
+            'network',
+            'bad_request',
+            'invalid_response',
+            'aborted',
+            'unconfigured',
+          ].includes(value.error as string))
+      );
     case 'lookup':
       return keys(value.keys);
     case 'page':

@@ -2,6 +2,9 @@ import { browser, type Browser } from 'wxt/browser';
 import { findSegments } from '../core/segment';
 import { makeCacheKey } from '../core/cache/key';
 import { PROMPT_VERSION } from '../core/prompt/version';
+import { uiRequest } from '../messaging/extension';
+import type { ProviderError } from '../providers/types';
+import { createProgress } from './progress';
 import type { BackgroundMessage, PagePayload } from '../messaging/types';
 import { SegmentRenderer, type RenderRecord } from './renderer';
 import { ensureStyle } from './style';
@@ -11,6 +14,15 @@ export function startPagePipeline() {
   let records: RenderRecord[] = [];
   const memory = new Map<string, string>();
   const requested = new Set<string>();
+  const everRequested = new Set<string>();
+  const restored = new Set<string>();
+  const translated = new Set<string>();
+  let error: ProviderError['kind'] | 'unconfigured' | undefined;
+  let configured = false;
+  let forceAll = false;
+  const progress = createProgress(document, () => {
+    void uiRequest({ type: 'openOptions' }).catch(() => {});
+  });
   let port: Browser.runtime.Port | undefined;
   let enabled = false,
     disposed = false,
@@ -32,8 +44,78 @@ export function startPagePipeline() {
       /* Reconnect handler resumes outstanding work. */
     }
   };
+  const report = () => {
+    progress.update({
+      requested: everRequested.size,
+      completed: everRequested.size - requested.size,
+      error,
+    });
+    post({
+      type: 'status',
+      enabled,
+      total: new Set(records.map((record) => record.key)).size,
+      restored: restored.size,
+      translated: translated.size,
+      pending: requested.size,
+      error,
+    });
+  };
+  const inspect = async () => {
+    if (enabled) {
+      post({
+        type: 'page',
+        pageId: pageId(),
+        keys: [...new Set(records.map((record) => record.key))],
+      });
+      report();
+      return;
+    }
+    const epoch = generation;
+    const keys = [
+      ...new Set(
+        await Promise.all(
+          findSegments(document.body, { targetLang }).map((segment) =>
+            makeCacheKey({
+              markup: segment.markup,
+              targetLang,
+              promptVersion: PROMPT_VERSION,
+            }),
+          ),
+        ),
+      ),
+    ];
+    if (epoch !== generation || disposed) return;
+    post({ type: 'page', pageId: pageId(), keys });
+    post({
+      type: 'status',
+      enabled,
+      total: keys.length,
+      restored: 0,
+      translated: 0,
+      pending: 0,
+    });
+  };
   const pageId = () => location.origin + location.pathname;
   const observeMissing = (keys: Set<string>) => {
+    if (forceAll) {
+      forceAll = false;
+      const blocks = new Set(
+        records
+          .filter((record) => keys.has(record.key) && !memory.has(record.key))
+          .map((record) => record.segment.block),
+      );
+      request(
+        [...blocks].map(
+          (block) =>
+            ({
+              target: block,
+              isIntersecting: true,
+              boundingClientRect: block.getBoundingClientRect(),
+            }) as IntersectionObserverEntry,
+        ),
+      );
+      return;
+    }
     for (const record of records) {
       if (
         keys.has(record.key) &&
@@ -57,7 +139,12 @@ export function startPagePipeline() {
           record.abandoned
         )
           continue;
+        if (!configured) {
+          error = 'unconfigured';
+          continue;
+        }
         requested.add(record.key);
+        everRequested.add(record.key);
         renderer.render(record, 'pending');
         items.push({
           key: record.key,
@@ -67,6 +154,7 @@ export function startPagePipeline() {
       }
       intersection?.unobserve(entry.target);
     }
+    report();
     if (items.length)
       post({
         type: 'translate',
@@ -125,6 +213,7 @@ export function startPagePipeline() {
       const keys = [...new Set(records.map((record) => record.key))];
       post({ type: 'page', pageId: pageId(), keys });
       post({ type: 'lookup', keys });
+      report();
     } finally {
       scanning = false;
       if (scanAgain) {
@@ -174,12 +263,21 @@ export function startPagePipeline() {
     records = [];
     requested.clear();
     memory.clear();
+    everRequested.clear();
+    restored.clear();
+    translated.clear();
+    error = undefined;
+    progress.update({ requested: 0, completed: 0 });
   };
-  const reset = () => {
+  const reset = (stop = false) => {
     clear();
     generation++;
-    post({ type: 'reset' });
-    if (!enabled || !connected) return;
+    post({ type: 'reset', ...(stop ? { stop: true } : {}) });
+    if (!connected) return;
+    if (!enabled) {
+      void inspect().catch(() => {});
+      return;
+    }
     ensureStyle(document);
     intersection = new IntersectionObserver(request, {
       rootMargin: `${innerHeight}px 0px ${innerHeight}px 0px`,
@@ -200,6 +298,7 @@ export function startPagePipeline() {
   const receive = (message: BackgroundMessage) => {
     if (message.type === 'mode') {
       const wasEnabled = enabled;
+      configured = message.configured;
       const changed =
         !connected ||
         message.targetLang !== targetLang ||
@@ -215,20 +314,33 @@ export function startPagePipeline() {
       );
       const wasConnected = connected;
       connected = true;
-      if (changed || !wasConnected || enabled !== wasEnabled) reset();
+      if (changed || !wasConnected || enabled !== wasEnabled)
+        reset(wasEnabled && !enabled);
       else if (!enabled) clear();
       return;
     }
     if (message.generation !== generation) return;
+    if (message.type === 'inspect') {
+      void inspect().catch(() => {});
+      return;
+    }
+    if (message.type === 'retranslate') {
+      forceAll = true;
+      enabled = true;
+      reset();
+      return;
+    }
     if (message.type === 'toggle') {
       enabled = !enabled;
-      reset();
+      reset(!enabled);
       return;
     }
     if (!enabled) return;
     if (message.type === 'cached') {
       for (const entry of message.entries) {
         memory.set(entry.key, entry.text);
+        if (!translated.has(entry.key)) restored.add(entry.key);
+        requested.delete(entry.key);
         for (const record of records)
           if (record.key === entry.key)
             renderer.render(record, 'ready', entry.text);
@@ -236,15 +348,19 @@ export function startPagePipeline() {
       if (!message.prefetch) observeMissing(new Set(message.keys));
     } else if (message.type === 'translated') {
       requested.delete(message.key);
+      translated.add(message.key);
+      restored.delete(message.key);
       memory.set(message.key, message.text);
       for (const record of records)
         if (record.key === message.key)
           renderer.render(record, 'ready', message.text);
     } else if (message.type === 'failed') {
       requested.delete(message.key);
+      if (message.kind !== 'aborted') error = message.kind;
       for (const record of records)
         if (record.key === message.key) renderer.render(record, 'error');
     }
+    report();
   };
   const connect = () => {
     if (disposed) return;
@@ -278,6 +394,7 @@ export function startPagePipeline() {
   return () => {
     disposed = true;
     clear();
+    progress.destroy();
     port?.disconnect();
     if (reconnectTimer) clearTimeout(reconnectTimer);
     if (routeTimer) clearInterval(routeTimer);

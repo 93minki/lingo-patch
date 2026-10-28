@@ -5,7 +5,7 @@ export default defineConfig({
   srcDir: 'src',
   manifest: ({ mode }) => ({
     name: 'lingo-patch',
-    permissions: ['storage', 'alarms'],
+    permissions: ['storage', 'alarms', 'activeTab'],
     host_permissions: [
       'https://api.openai.com/*',
       'https://api.anthropic.com/*',
@@ -15,7 +15,7 @@ export default defineConfig({
       'https://openrouter.ai/*',
       ...(mode === 'e2e' ? ['http://127.0.0.1/*'] : []),
     ],
-    optional_host_permissions: ['https://*/*', 'http://localhost/*'],
+    optional_host_permissions: ['https://*/*', 'http://*/*'],
     commands: {
       'toggle-translate': {
         suggested_key: { default: 'Alt+A' },

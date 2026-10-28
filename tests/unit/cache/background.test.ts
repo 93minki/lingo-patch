@@ -22,6 +22,7 @@ vi.mock('wxt/browser', () => ({
   browser: {
     runtime: {
       onConnect: { addListener: vi.fn() },
+      onMessage: { addListener: vi.fn() },
       openOptionsPage: vi.fn(async () => {}),
       onInstalled: { addListener: mocks.installed },
       onStartup: { addListener: mocks.startup },
@@ -77,7 +78,7 @@ test.each(['installed', 'startup'] as const)(
   'registers daily eviction on %s only when missing',
   async (event) => {
     const listener = mocks[event].mock.calls[0]![0];
-    await listener();
+    await listener({ reason: 'install' });
     expect(mocks.get).toHaveBeenCalledWith('lp-evict');
     expect(mocks.create).toHaveBeenCalledWith('lp-evict', {
       delayInMinutes: 1440,
@@ -85,7 +86,7 @@ test.each(['installed', 'startup'] as const)(
     });
     mocks.create.mockClear();
     mocks.get.mockResolvedValue({ name: 'lp-evict' });
-    await listener();
+    await listener({ reason: 'install' });
     expect(mocks.create).not.toHaveBeenCalled();
   },
 );
@@ -154,4 +155,11 @@ test('toggle command opens setup without a key and targets active tab; settings 
   mocks.settingsChanged.mock.calls[0]![0](next);
   await Promise.resolve();
   expect(mocks.serviceUpdate).toHaveBeenCalledWith(next);
+});
+test('opens first-run setup on install only, without reopening on extension updates', async () => {
+  const installed = mocks.installed.mock.calls[0]![0];
+  await installed({ reason: 'update' });
+  expect(browser.runtime.openOptionsPage).not.toHaveBeenCalled();
+  await installed({ reason: 'install' });
+  expect(browser.runtime.openOptionsPage).toHaveBeenCalledOnce();
 });

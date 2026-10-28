@@ -155,7 +155,7 @@ test('rejects spoofed keys and ignores malformed messages without network calls'
   );
   expect(mock.translate).not.toHaveBeenCalled();
 });
-test('reset cancels active requests and suppresses replies from old generations', async () => {
+test('reset keeps sent requests alive and suppresses replies from old generations', async () => {
   let signal: AbortSignal | undefined;
   mock.translate.mockImplementation((req: TranslateRequest) => {
     signal = req.signal;
@@ -172,7 +172,7 @@ test('reset cancels active requests and suppresses replies from old generations'
   });
   await vi.waitFor(() => expect(mock.translate).toHaveBeenCalledOnce());
   a.send({ type: 'reset', generation: 1 });
-  expect(signal!.aborted).toBe(true);
+  expect(signal!.aborted).toBe(false);
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(
     a.messages.filter((m) => m.type === 'failed' || m.type === 'translated'),
@@ -195,7 +195,79 @@ test('settings changes send only safe state and disconnect cancels outstanding w
   });
   await vi.waitFor(() => expect(mock.translate).toHaveBeenCalledOnce());
   a.disconnect();
-  expect(signal!.aborted).toBe(true);
+  expect(signal!.aborted).toBe(false);
   service.update({ ...settings, targetLang: 'ja' });
+  expect(signal!.aborted).toBe(true);
   expect(JSON.stringify(a.messages)).not.toContain('private-fake-key');
+});
+
+test('sent translations persist after their tab disconnects', async () => {
+  let finish!: (value: { items: { id: string; text: string }[] }) => void;
+  mock.translate.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const a = port(1);
+  service.connect(a.value);
+  const markup = 'Detached translation';
+  const key = await keyFor(markup);
+  a.send({
+    type: 'translate',
+    generation: 0,
+    items: [{ key, markup, priority: 2 }],
+  });
+  await vi.waitFor(() => expect(mock.translate).toHaveBeenCalledOnce());
+  a.disconnect();
+  finish({ items: [{ id: '0', text: '저장된 번역' }] });
+  await vi.waitFor(async () =>
+    expect((await db.getMany([key])).get(key)?.translated).toBe('저장된 번역'),
+  );
+  expect(a.messages.filter((m) => m.type === 'translated')).toHaveLength(0);
+});
+test('retranslation removes only page keys after inspecting current content', async () => {
+  const a = port(1);
+  service.connect(a.value);
+  const key = await keyFor('Page source');
+  const other = await keyFor('Other source');
+  await db.putMany([
+    { key, value: { translated: '기존', model: 'm', provider: 'p' } },
+    { key: other, value: { translated: '유지', model: 'm', provider: 'p' } },
+  ]);
+  const done = service.retranslate(1);
+  expect(a.messages.at(-1)).toMatchObject({ type: 'inspect' });
+  a.send({
+    type: 'page',
+    generation: 0,
+    pageId: 'https://site.test/a',
+    keys: [key],
+  });
+  await done;
+  expect(await db.getMany([key, other])).toHaveProperty('size', 1);
+  expect((await db.getMany([other])).has(other)).toBe(true);
+  expect(a.messages.at(-1)).toMatchObject({ type: 'retranslate' });
+});
+test('navigation during retranslation inspection cannot delete or retranslate the new page', async () => {
+  const a = port(1);
+  service.connect(a.value);
+  const key = await keyFor('Existing source');
+  await db.putMany([
+    { key, value: { translated: '유지', model: 'm', provider: 'p' } },
+  ]);
+  const result = expect(service.retranslate(1)).rejects.toMatchObject({
+    kind: 'aborted',
+  });
+  a.send({ type: 'reset', generation: 1 });
+  a.send({
+    type: 'page',
+    generation: 1,
+    pageId: 'https://site.test/new',
+    keys: [],
+  });
+  await result;
+  expect((await db.getMany([key])).has(key)).toBe(true);
+  expect(a.messages.some((message) => message.type === 'retranslate')).toBe(
+    false,
+  );
 });

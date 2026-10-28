@@ -24,6 +24,7 @@ const mode = (autoEnabled = true, revision = 0): BackgroundMessage => ({
   targetLang: 'ko',
   autoEnabled,
   revision,
+  configured: true,
 });
 const nextScan = async () => {
   await vi.advanceTimersByTimeAsync(350);
@@ -98,7 +99,11 @@ test('waits for enable, looks up first, requests only nearby misses and toggles 
   });
   expect(observe).toHaveBeenCalledWith(document.querySelector('p'));
   inView();
-  expect(messages.at(-1)).toMatchObject({
+  expect(
+    messages
+      .filter((m) => m.type === 'translate' || m.type === 'lookup')
+      .at(-1),
+  ).toMatchObject({
     type: 'translate',
     items: [
       { key: 'Source paragraph', markup: 'Source paragraph', priority: 2 },
@@ -122,9 +127,13 @@ test('waits for enable, looks up first, requests only nearby misses and toggles 
   const off = document.createElement('p');
   off.textContent = 'Added while off';
   document.body.append(off);
-  const count = messages.length;
+  const count = messages.filter(
+    (m) => m.type === 'translate' || m.type === 'lookup',
+  ).length;
   await nextScan();
-  expect(messages).toHaveLength(count);
+  expect(
+    messages.filter((m) => m.type === 'translate' || m.type === 'lookup'),
+  ).toHaveLength(count);
 });
 test('cache restoration and removed-node repair make no translation request; source additions debounce', async () => {
   dispose = startPagePipeline();
@@ -148,7 +157,11 @@ test('cache restoration and removed-node repair make no translation request; sou
   await vi.advanceTimersByTimeAsync(100);
   expect(messages.filter((m) => m.type === 'lookup')).toHaveLength(count);
   await nextScan();
-  expect(messages.at(-1)).toMatchObject({
+  expect(
+    messages
+      .filter((m) => m.type === 'translate' || m.type === 'lookup')
+      .at(-1),
+  ).toMatchObject({
     type: 'lookup',
     keys: ['Source paragraph', 'New paragraph'],
   });

@@ -29,6 +29,7 @@ export interface CacheDb {
     opts: { ttlMs: number; maxBytes: number },
   ): Promise<{ deleted: number; bytesAfter: number }>;
   usage(): Promise<{ count: number; bytes: number }>;
+  deleteMany(keys: string[]): Promise<void>;
   deleteSite(origin: string): Promise<number>;
   clear(): Promise<void>;
   close(): void;
@@ -169,6 +170,12 @@ export async function openCacheDb(name = 'lingo-patch'): Promise<CacheDb> {
           bytes += cursor.value.bytes;
         }
         return { count, bytes };
+      });
+    },
+    deleteMany(keys) {
+      return transaction(['segments'], 'readwrite', async (tx) => {
+        const store = tx.objectStore('segments');
+        for (const key of new Set(keys)) await store.delete(key);
       });
     },
     deleteSite(origin) {

@@ -1,3 +1,4 @@
+import { strings } from '../ui/strings';
 import { deserialize, findSegments, type Segment } from '../core/segment';
 export interface RenderRecord {
   key: string;
@@ -65,7 +66,7 @@ export class SegmentRenderer {
       );
     if (state === 'error') {
       node.textContent = '⚠';
-      node.title = 'Translation failed';
+      node.title = strings.progress.partialFailure;
     }
     const { block: parent, anchor } = record.segment;
     parent.insertBefore(node, anchor?.parentNode === parent ? anchor : null);

@@ -8,6 +8,7 @@ import {
   onSettingsChanged,
 } from '../storage/settings';
 import { createPageService } from '../messaging/service';
+import { createUiApi } from '../messaging/api';
 
 export default defineBackground(() => {
   const ready =
@@ -19,8 +20,40 @@ export default defineBackground(() => {
   let service: Promise<ReturnType<typeof createPageService>> | undefined;
   const getService = () =>
     (service ??= ready.then(async () =>
-      createPageService(await openCacheDb(), await getSettings()),
+      createPageService(
+        await openCacheDb(),
+        await getSettings(),
+        (tabId, status) => {
+          void browser.action
+            .setBadgeText({
+              tabId,
+              text: status?.error
+                ? '!'
+                : status?.pending
+                  ? String(status.pending)
+                  : '',
+            })
+            .catch(() => {});
+          void browser.action
+            .setBadgeBackgroundColor({
+              tabId,
+              color: status?.error ? '#b91c1c' : '#2563eb',
+            })
+            .catch(() => {});
+        },
+      ),
     ));
+  const uiApi = createUiApi(getService);
+  browser.runtime.onMessage.addListener((message: unknown, sender) => {
+    if (
+      typeof message === 'object' &&
+      message !== null &&
+      'scope' in message &&
+      message.scope === 'lp-ui'
+    )
+      return uiApi(message, sender);
+    return undefined;
+  });
   onSettingsChanged((settings) => {
     if (service)
       void service
@@ -80,12 +113,12 @@ export default defineBackground(() => {
     registerAlarm().catch((error) =>
       console.error('Failed to schedule cache eviction', error),
     );
-  browser.runtime.onInstalled.addListener(() => {
+  browser.runtime.onInstalled.addListener((details) => {
     console.log('lingo-patch installed');
     return Promise.all([
       schedule(),
       ready.then(async () => {
-        if (!(await getSettings()).provider)
+        if (details.reason === 'install' && !(await getSettings()).provider)
           await browser.runtime.openOptionsPage();
       }),
     ]).catch(() => console.error('Unable to initialize extension'));

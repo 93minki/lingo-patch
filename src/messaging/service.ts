@@ -4,6 +4,7 @@ import { makeCacheKey } from '../core/cache/key';
 import { PROMPT_VERSION } from '../core/prompt/version';
 import { createProvider, ProviderError } from '../providers';
 import type { CacheDb } from '../storage/cache-db';
+import type { TabStatus } from './extension';
 import type { Settings } from '../storage/settings';
 import {
   isPageMessage,
@@ -19,12 +20,23 @@ interface Connection {
   generation: number;
   origin: string;
   hostname: string;
+  keys: string[];
+  inspected?: () => void;
+  inspection?: Promise<void>;
+  stats: Pick<
+    TabStatus,
+    'enabled' | 'total' | 'restored' | 'translated' | 'pending' | 'error'
+  >;
 }
 interface Task {
   promise: Promise<string>;
   saving: boolean;
 }
-export function createPageService(db: CacheDb, initial: Settings) {
+export function createPageService(
+  db: CacheDb,
+  initial: Settings,
+  onStatus?: (tabId: number, status?: TabStatus) => void,
+) {
   let settings = initial;
   let revision = 0;
   const connections = new Map<number, Connection>();
@@ -49,7 +61,17 @@ export function createPageService(db: CacheDb, initial: Settings) {
       targetLang: settings.targetLang,
       autoEnabled: settings.autoSites.includes(connection.hostname),
       revision,
+      configured: Boolean(settings.provider),
     });
+  const status = (connection: Connection): TabStatus => ({
+    ...connection.stats,
+    available: true,
+    configured: Boolean(settings.provider),
+    hostname: connection.hostname,
+    origin: connection.origin,
+    autoEnabled: settings.autoSites.includes(connection.hostname),
+    displayMode: settings.displayMode,
+  });
   const configure = () => {
     const cfg = settings.provider;
     const selected = cfg ? createProvider(cfg) : undefined;
@@ -96,14 +118,36 @@ export function createPageService(db: CacheDb, initial: Settings) {
     });
   };
   const handle = async (connection: Connection, message: PageMessage) => {
+    if (message.type === 'openOptions') return;
     if (message.type === 'reset') {
       if (message.generation < connection.generation) return;
       connection.generation = message.generation;
-      queue.cancelTab(connection.tabId);
+      queue.cancelTab(connection.tabId, message.stop === true);
+      connection.stats = {
+        enabled: false,
+        total: 0,
+        restored: 0,
+        translated: 0,
+        pending: 0,
+      };
+      onStatus?.(connection.tabId, status(connection));
       return;
     }
     if (message.generation !== connection.generation) return;
     const generation = message.generation;
+    if (message.type === 'status') {
+      const { enabled, total, restored, translated, pending, error } = message;
+      connection.stats = {
+        enabled,
+        total,
+        restored,
+        translated,
+        pending,
+        error,
+      };
+      onStatus?.(connection.tabId, status(connection));
+      return;
+    }
     if (message.type === 'lookup')
       return lookup(connection, message.keys, generation);
     if (message.type === 'page') {
@@ -116,7 +160,9 @@ export function createPageService(db: CacheDb, initial: Settings) {
           generation,
           true,
         );
+      connection.keys = message.keys;
       await db.putPage(message.pageId, message.keys);
+      connection.inspected?.();
       return;
     }
     const currentQueue = queue;
@@ -136,7 +182,11 @@ export function createPageService(db: CacheDb, initial: Settings) {
           )
             throw new ProviderError('bad_request');
           const cached = await db.getMany([item.key]);
-          if (connection.generation !== generation || queue !== currentQueue)
+          if (
+            connections.get(connection.tabId) !== connection ||
+            connection.generation !== generation ||
+            queue !== currentQueue
+          )
             return;
           if (cached.has(item.key)) {
             send(connection, {
@@ -221,6 +271,14 @@ export function createPageService(db: CacheDb, initial: Settings) {
         generation: 0,
         origin: address.origin,
         hostname: address.hostname,
+        keys: [],
+        stats: {
+          enabled: false,
+          total: 0,
+          restored: 0,
+          translated: 0,
+          pending: 0,
+        },
       };
       connections.set(tabId, connection);
       port.onMessage.addListener((message: unknown) => {
@@ -232,8 +290,10 @@ export function createPageService(db: CacheDb, initial: Settings) {
       });
       port.onDisconnect.addListener(() => {
         if (connections.get(tabId) === connection) {
+          connection.inspected?.();
           connections.delete(tabId);
           queue.cancelTab(tabId);
+          onStatus?.(tabId);
         }
       });
       mode(connection);
@@ -247,18 +307,64 @@ export function createPageService(db: CacheDb, initial: Settings) {
         ]) !== JSON.stringify([next.provider, next.preset, next.targetLang]);
       settings = next;
       if (changed) {
-        for (const tabId of connections.keys()) queue.cancelTab(tabId);
+        queue.abortAll();
         revision++;
         configure();
       }
-      for (const connection of connections.values()) mode(connection);
+      for (const connection of connections.values()) {
+        mode(connection);
+        onStatus?.(connection.tabId, status(connection));
+      }
     },
+    async inspect(tabId: number) {
+      const connection = connections.get(tabId);
+      if (!connection) return;
+      if (!connection.inspection) {
+        connection.inspection = new Promise<void>((resolve) => {
+          const done = () => {
+            clearTimeout(timer);
+            connection.inspected = undefined;
+            connection.inspection = undefined;
+            resolve();
+          };
+          const timer = setTimeout(done, 1500);
+          connection.inspected = done;
+          send(connection, { type: 'inspect' });
+        });
+      }
+      await connection.inspection;
+    },
+    status(tabId: number) {
+      const connection = connections.get(tabId);
+      return connection ? status(connection) : undefined;
+    },
+    async retranslate(tabId: number) {
+      const connection = connections.get(tabId);
+      if (!connection) throw new ProviderError('bad_request');
+      const generation = connection.generation;
+      const current = () =>
+        connections.get(tabId) === connection &&
+        connection.generation === generation;
+      await this.inspect(tabId);
+      if (!current()) throw new ProviderError('aborted');
+      const keys = [...connection.keys];
+      await Promise.allSettled(
+        keys.flatMap((key) => tasks.get(key)?.promise ?? []),
+      );
+      if (!current()) throw new ProviderError('aborted');
+      await db.deleteMany(keys);
+      if (!current()) throw new ProviderError('aborted');
+      send(connection, { type: 'retranslate' });
+    },
+    cacheUsage: () => db.usage(),
+    clearCache: () => db.clear(),
+    deleteSiteCache: (origin: string) => db.deleteSite(origin),
     toggle(tabId: number) {
       const connection = connections.get(tabId);
       if (connection) send(connection, { type: 'toggle' });
     },
     close() {
-      for (const tabId of connections.keys()) queue.cancelTab(tabId);
+      queue.abortAll();
       connections.clear();
       db.close();
     },
