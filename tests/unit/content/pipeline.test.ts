@@ -264,7 +264,7 @@ test('cache restoration and removed-node repair make no translation request; sou
       .at(-1),
   ).toMatchObject({
     type: 'lookup',
-    keys: ['Source paragraph', 'New paragraph'],
+    keys: ['New paragraph'],
   });
 });
 test('SPA reset rejects stale results and reconnect scans again', async () => {

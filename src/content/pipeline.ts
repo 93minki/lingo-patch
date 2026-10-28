@@ -13,6 +13,16 @@ import { isContentPing } from '../messaging/content-ping';
 import type { GlossaryEntry } from '../core/glossary/types';
 import { createSelectionOverlay } from './selection-overlay';
 import { deserialize } from '../core/segment';
+import { createMarkupKeyCache } from './key-cache';
+import { RecordIndex } from './record-index';
+import {
+  BLOCK_RESCAN_MS,
+  INCREMENTAL_PAGE_MS,
+  collectMutationRoots,
+  createPendingScan,
+  pickIncrementalRoots,
+  shouldFullScan,
+} from './incremental-scan';
 
 declare global {
   interface Window {
@@ -23,7 +33,7 @@ declare global {
 export function startPagePipeline() {
   window.__lpPipelineDispose?.();
   const renderer = new SegmentRenderer(document);
-  let records: RenderRecord[] = [];
+  const index = new RecordIndex();
   const memory = new Map<string, string>();
   const requested = new Set<string>();
   const everRequested = new Set<string>();
@@ -47,7 +57,6 @@ export function startPagePipeline() {
     targetLang = 'ko',
     lastRevision = -1,
     lastAuto: boolean | undefined;
-  // Hash-only changes (docs sites update #section while scrolling) are the same page.
   const pageUrl = () => location.origin + location.pathname + location.search;
   let href = pageUrl();
   let scanTimer: ReturnType<typeof setTimeout> | undefined;
@@ -56,6 +65,17 @@ export function startPagePipeline() {
   let scanning = false,
     scanAgain = false;
   let started = false;
+  const pendingScan = createPendingScan();
+  const blockLastScan = new Map<Element, number>();
+  let lastIncrementalPageAt = 0;
+  const keyCache = createMarkupKeyCache(async (markup) =>
+    makeCacheKey({
+      markup,
+      targetLang,
+      promptVersion: PROMPT_VERSION,
+      glossary,
+    }),
+  );
   const post = (message: PagePayload) => {
     try {
       port?.postMessage({ ...message, generation });
@@ -63,6 +83,9 @@ export function startPagePipeline() {
       /* Reconnect handler resumes outstanding work. */
     }
   };
+  const uniqueKeys = () => [
+    ...new Set(index.records.map((record) => record.key)),
+  ];
   const report = () => {
     progress.update({
       requested: everRequested.size,
@@ -72,7 +95,7 @@ export function startPagePipeline() {
     post({
       type: 'status',
       enabled,
-      total: new Set(records.map((record) => record.key)).size,
+      total: uniqueKeys().length,
       restored: restored.size,
       translated: translated.size,
       pending: requested.size,
@@ -84,7 +107,7 @@ export function startPagePipeline() {
       post({
         type: 'page',
         pageId: pageId(),
-        keys: [...new Set(records.map((record) => record.key))],
+        keys: uniqueKeys(),
       });
       report();
       return;
@@ -96,14 +119,7 @@ export function startPagePipeline() {
         await Promise.all(
           findSegments(document.body, { targetLang })
             .filter((segment) => !skipFixedBars || !excluded(segment.block))
-            .map((segment) =>
-              makeCacheKey({
-                markup: segment.markup,
-                targetLang,
-                promptVersion: PROMPT_VERSION,
-                glossary,
-              }),
-            ),
+            .map((segment) => keyCache.get(segment.markup)),
         ),
       ),
     ];
@@ -123,7 +139,7 @@ export function startPagePipeline() {
     if (forceAll) {
       forceAll = false;
       const blocks = new Set(
-        records
+        index.records
           .filter((record) => keys.has(record.key) && !memory.has(record.key))
           .map((record) => record.segment.block),
       );
@@ -139,7 +155,7 @@ export function startPagePipeline() {
       );
       return;
     }
-    for (const record of records) {
+    for (const record of index.records) {
       if (
         keys.has(record.key) &&
         !memory.has(record.key) &&
@@ -154,9 +170,9 @@ export function startPagePipeline() {
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;
       const rect = entry.boundingClientRect;
-      for (const record of records) {
+      const block = entry.target as Element;
+      for (const record of index.getByBlock(block)) {
         if (
-          record.segment.block !== entry.target ||
           memory.has(record.key) ||
           requested.has(record.key) ||
           record.abandoned
@@ -188,6 +204,139 @@ export function startPagePipeline() {
         },
       });
   };
+  const upsertSegment = (
+    key: string,
+    segment: RenderRecord['segment'],
+  ): RenderRecord => {
+    let old = index.find(key, segment.block, segment.anchor);
+    if (
+      old &&
+      segment.placeholders.some(
+        (placeholder, i) =>
+          placeholder.node !== old!.segment.placeholders[i]?.node,
+      )
+    ) {
+      renderer.remove(old);
+      index.detach(old);
+      old = undefined;
+    }
+    const record = old ?? renderer.create(key, segment);
+    record.segment = segment;
+    if (!old) index.attach(record);
+    if (memory.has(key)) renderer.render(record, 'ready', memory.get(key)!);
+    return record;
+  };
+  async function scanFull() {
+    if (!enabled || !connected || disposed) return;
+    const epoch = generation;
+    const excluded = createFixedBarFilter(document);
+    const segments = findSegments(document.body, { targetLang }).filter(
+      (segment) => !skipFixedBars || !excluded(segment.block),
+    );
+    const keyed = await Promise.all(
+      segments.map(async (segment) => ({
+        segment,
+        key: await keyCache.get(segment.markup),
+      })),
+    );
+    if (epoch !== generation || !enabled || disposed) return;
+    const next: RenderRecord[] = [];
+    for (const { key, segment } of keyed) {
+      next.push(upsertSegment(key, segment));
+    }
+    const nextSet = new Set(next);
+    for (const old of [...index.records]) {
+      if (!nextSet.has(old)) {
+        renderer.remove(old);
+        index.detach(old);
+      }
+    }
+    const keys = uniqueKeys();
+    post({ type: 'page', pageId: pageId(), keys });
+    post({ type: 'lookup', keys });
+    lastIncrementalPageAt = Date.now();
+    report();
+  }
+  async function scanIncremental(roots: Element[]) {
+    if (!enabled || !connected || disposed) return;
+    const epoch = generation;
+    const excluded = createFixedBarFilter(document);
+    // Blocks removed from the page leave records nothing else would clean up.
+    for (const record of [...index.records])
+      if (!record.segment.block.isConnected) {
+        renderer.remove(record);
+        index.detach(record);
+      }
+    const touched = new Set<RenderRecord>();
+    const nextInRegion = new Set<RenderRecord>();
+    for (const root of roots) {
+      if (!root.isConnected) continue;
+      for (const record of index.recordsInRegion(root)) touched.add(record);
+      const segments = findSegments(root, { targetLang }).filter(
+        (segment) => !skipFixedBars || !excluded(segment.block),
+      );
+      const keyed = await Promise.all(
+        segments.map(async (segment) => ({
+          segment,
+          key: await keyCache.get(segment.markup),
+        })),
+      );
+      if (epoch !== generation || !enabled || disposed) return;
+      for (const { key, segment } of keyed) {
+        nextInRegion.add(upsertSegment(key, segment));
+      }
+    }
+    for (const old of touched) {
+      if (!nextInRegion.has(old)) {
+        renderer.remove(old);
+        index.detach(old);
+      }
+    }
+    const now = Date.now();
+    if (now - lastIncrementalPageAt >= INCREMENTAL_PAGE_MS) {
+      post({ type: 'page', pageId: pageId(), keys: uniqueKeys() });
+      lastIncrementalPageAt = now;
+    }
+    const priorKeys = new Set<string>();
+    for (const record of touched) priorKeys.add(record.key);
+    const lookupKeys = [
+      ...new Set(
+        [...nextInRegion]
+          .map((record) => record.key)
+          .filter((key) => !memory.has(key) && !priorKeys.has(key)),
+      ),
+    ];
+    if (lookupKeys.length) post({ type: 'lookup', keys: lookupKeys });
+    report();
+  }
+  async function runScheduledScan() {
+    if (shouldFullScan(pendingScan)) {
+      pendingScan.roots.clear();
+      pendingScan.bodySwap = false;
+      await scanFull();
+      return;
+    }
+    const roots = [...pendingScan.roots];
+    pendingScan.roots.clear();
+    pendingScan.bodySwap = false;
+    if (!roots.length) {
+      await scanFull();
+      return;
+    }
+    const now = Date.now();
+    const { scan, waitMs } = pickIncrementalRoots(roots, blockLastScan, now);
+    if (!scan.length) {
+      for (const root of roots) pendingScan.roots.add(root);
+      scheduleScan(Math.max(waitMs, 50));
+      return;
+    }
+    for (const root of scan) blockLastScan.set(root, now);
+    for (const root of roots) {
+      if (!scan.includes(root)) pendingScan.roots.add(root);
+    }
+    await scanIncremental(scan);
+    if (pendingScan.roots.size) scheduleScan(BLOCK_RESCAN_MS);
+  }
   async function scan() {
     if (!enabled || !connected || disposed) return;
     if (scanning) {
@@ -195,52 +344,8 @@ export function startPagePipeline() {
       return;
     }
     scanning = true;
-    const epoch = generation;
     try {
-      const excluded = createFixedBarFilter(document);
-      const segments = findSegments(document.body, { targetLang }).filter(
-        (segment) => !skipFixedBars || !excluded(segment.block),
-      );
-      const keyed = await Promise.all(
-        segments.map(async (segment) => ({
-          segment,
-          key: await makeCacheKey({
-            markup: segment.markup,
-            targetLang,
-            promptVersion: PROMPT_VERSION,
-            glossary,
-          }),
-        })),
-      );
-      if (epoch !== generation || !enabled || disposed) return;
-      const next: RenderRecord[] = [];
-      for (const { key, segment } of keyed) {
-        const old = records.find(
-          (record) =>
-            record.key === key &&
-            record.segment.block === segment.block &&
-            record.segment.anchor === segment.anchor,
-        );
-        const record = old ?? renderer.create(key, segment);
-        if (
-          old &&
-          segment.placeholders.some(
-            (placeholder, index) =>
-              placeholder.node !== old.segment.placeholders[index]?.node,
-          )
-        ) {
-          renderer.remove(old);
-        }
-        record.segment = segment;
-        next.push(record);
-        if (memory.has(key)) renderer.render(record, 'ready', memory.get(key));
-      }
-      for (const old of records) if (!next.includes(old)) renderer.remove(old);
-      records = next;
-      const keys = [...new Set(records.map((record) => record.key))];
-      post({ type: 'page', pageId: pageId(), keys });
-      post({ type: 'lookup', keys });
-      report();
+      await runScheduledScan();
     } finally {
       scanning = false;
       if (scanAgain) {
@@ -260,25 +365,12 @@ export function startPagePipeline() {
   };
   const mutations = new MutationObserver((changes) => {
     if (!enabled) return;
-    let sourceChanged = false;
-    for (const change of changes) {
-      if (
-        (change.target.nodeType === 1
-          ? (change.target as Element)
-          : change.target.parentElement
-        )?.closest('lp-t')
-      )
-        continue;
-      if (change.type === 'characterData') sourceChanged = true;
-      else if (
-        [...change.addedNodes, ...change.removedNodes].some(
-          (node) =>
-            node.nodeType !== 1 || (node as Element).localName !== 'lp-t',
-        )
-      )
-        sourceChanged = true;
-    }
-    for (const record of records) renderer.restore(record);
+    const sourceChanged = collectMutationRoots(
+      changes,
+      document.body,
+      pendingScan,
+    );
+    for (const record of index.records) renderer.restore(record);
     if (sourceChanged) scheduleScan();
   });
   const clear = () => {
@@ -286,15 +378,20 @@ export function startPagePipeline() {
     intersection?.disconnect();
     if (scanTimer) clearTimeout(scanTimer);
     scanTimer = undefined;
-    renderer.clear(records);
+    renderer.clear(index.records);
     selectionRequests.clear();
-    records = [];
+    index.clear();
     requested.clear();
     memory.clear();
+    keyCache.clear();
     everRequested.clear();
     restored.clear();
     translated.clear();
     error = undefined;
+    pendingScan.roots.clear();
+    pendingScan.bodySwap = false;
+    blockLastScan.clear();
+    lastIncrementalPageAt = 0;
     progress.update({ requested: 0, completed: 0 });
   };
   const reset = (stop = false) => {
@@ -323,6 +420,12 @@ export function startPagePipeline() {
     });
     scheduleScan(0);
   };
+  const renderKey = (key: string, state: 'ready' | 'error', text?: string) => {
+    for (const record of index.getByKey(key)) {
+      if (state === 'ready') renderer.render(record, 'ready', text ?? '');
+      else renderer.render(record, 'error');
+    }
+  };
   const receive = (message: BackgroundMessage) => {
     if (message.type === 'mode') {
       const wasEnabled = enabled;
@@ -337,6 +440,7 @@ export function startPagePipeline() {
       configured = message.configured;
       selectionTranslation = message.selectionTranslation !== false;
       const changed = message.targetLang !== targetLang;
+      if (glossaryChanged || changed || revisionChanged) keyCache.clear();
       if (lastAuto === undefined || lastAuto !== message.autoEnabled)
         enabled = message.autoEnabled;
       lastAuto = message.autoEnabled;
@@ -359,7 +463,7 @@ export function startPagePipeline() {
         requested.clear();
         if (!wasConnected) post({ type: 'reset' });
         if (enabled) {
-          const keys = [...new Set(records.map((record) => record.key))];
+          const keys = uniqueKeys();
           post({ type: 'page', pageId: pageId(), keys });
           post({ type: 'lookup', keys });
           report();
@@ -417,9 +521,7 @@ export function startPagePipeline() {
         memory.set(entry.key, entry.text);
         if (!translated.has(entry.key)) restored.add(entry.key);
         requested.delete(entry.key);
-        for (const record of records)
-          if (record.key === entry.key)
-            renderer.render(record, 'ready', entry.text);
+        renderKey(entry.key, 'ready', entry.text);
       }
       if (!message.prefetch) observeMissing(new Set(message.keys));
     } else if (message.type === 'translated') {
@@ -427,14 +529,11 @@ export function startPagePipeline() {
       translated.add(message.key);
       restored.delete(message.key);
       memory.set(message.key, message.text);
-      for (const record of records)
-        if (record.key === message.key)
-          renderer.render(record, 'ready', message.text);
+      renderKey(message.key, 'ready', message.text);
     } else if (message.type === 'failed') {
       requested.delete(message.key);
       if (message.kind !== 'aborted') error = message.kind;
-      for (const record of records)
-        if (record.key === message.key) renderer.render(record, 'error');
+      renderKey(message.key, 'error');
     }
     report();
   };
@@ -554,7 +653,6 @@ export function startPagePipeline() {
   const navigate = () => {
     if (pageUrl() !== href) {
       href = pageUrl();
-      // A manual toggle applies to one page; the next page follows the site setting.
       enabled = Boolean(lastAuto);
       reset();
     }
