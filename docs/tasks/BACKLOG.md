@@ -9,7 +9,6 @@
 | P4 보고 | ~~호버/단축키 실기 검증~~ 호버 기능 제거됨, 단축키는 Mac Control로 변경 | ✅ 정리 |
 | P0~ | Firefox `data_collection_permissions` 미선언 경고 | ✅ 완료 (aefe9f4) |
 | P3 검수 | `core/prompt`가 `providers/types`(ProviderError)에 의존 — core→providers 역방향 의존 | 하 |
-
 | P7 | Next.js 사이드바처럼 원문 칸이 `flex:1; truncate`면 번역문이 오른쪽 끝에 붙고 원문이 잘림 | 실사용 판단 |
 | P7 | Firefox·Whale 실기 검증 (이 Mac에 미설치), Safari 실기 검증 | 수동 |
 | P7 | `scan-block.ts`의 블록 판정 규칙이 `core/segment`와 중복 정의됨 — 한쪽만 바뀌면 어긋날 수 있음 | 하 |
