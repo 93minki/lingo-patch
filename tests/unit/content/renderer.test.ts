@@ -178,3 +178,20 @@ test('marks source inline nodes of every segment sharing a block', () => {
     true,
   );
 });
+test('compact requires at most 40 normalized characters and at most 1.6 lines', () => {
+  const { renderer, record, block } = setup(
+    '<p style="display:flex;flex-direction:row;font-size:20px;line-height:24px">Short label</p>',
+  );
+  vi.spyOn(block, 'getBoundingClientRect').mockReturnValue({
+    height: 24,
+  } as DOMRect);
+  renderer.render(record, 'ready', '짧은 번역');
+  expect(record.node!.dataset.lpDisplay).toBe('compact');
+  expect(record.node!.dataset.lpLayout).toBe('horizontal');
+  renderer.remove(record);
+  vi.spyOn(block, 'getBoundingClientRect').mockReturnValue({
+    height: 50,
+  } as DOMRect);
+  renderer.render(record, 'ready', '긴 번역');
+  expect(record.node!.dataset.lpDisplay).toBe('inline');
+});

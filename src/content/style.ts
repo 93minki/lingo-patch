@@ -13,6 +13,18 @@ lp-t[data-lp-display="inline"] {
   display: inline;
   margin-left: 0.4em;
 }
+lp-t[data-lp-display="compact"] {
+  display: inline;
+  margin-left: 0.5em;
+  white-space: nowrap;
+}
+lp-t[data-lp-layout="horizontal"][data-lp-display="compact"] {
+  flex: none;
+}
+lp-t[data-lp-layout="horizontal"][data-lp-display="inline"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 html[data-lp-mode="original"] lp-t {
   display: none !important;
 }
@@ -30,6 +42,20 @@ html[data-lp-mode="translation"] [data-lp-src-hidden] > lp-t {
   /* Share the hidden source's first line so list markers stay beside the text. */
   display: inline !important;
   margin-left: 0 !important;
+}
+html[data-lp-mode="translation"] [data-lp-src-hidden] > lp-t[data-lp-display="compact"] {
+  white-space: nowrap !important;
+}
+html[data-lp-mode="translation"]
+  [data-lp-src-hidden]
+  > lp-t[data-lp-layout="horizontal"][data-lp-display="compact"] {
+  flex: none !important;
+}
+html[data-lp-mode="translation"]
+  [data-lp-src-hidden]
+  > lp-t[data-lp-layout="horizontal"][data-lp-display="inline"] {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
 }
 html[data-lp-mode="translation"] li[data-lp-src-hidden]::marker {
   font-size: 1rem;

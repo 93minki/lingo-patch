@@ -26,7 +26,10 @@ import { strings } from '../../../src/ui/strings';
 vi.mock('wxt/browser', () => ({
   browser: {
     commands: { getAll: vi.fn(async () => []) },
-    runtime: { id: 'test', getURL: (p: string) => `chrome-extension://test${p}` },
+    runtime: {
+      id: 'test',
+      getURL: (p: string) => `chrome-extension://test${p}`,
+    },
   },
 }));
 
@@ -35,6 +38,7 @@ const DEFAULT_SETTINGS: Settings = {
   targetLang: 'ko',
   autoSites: [],
   displayMode: 'bilingual',
+  skipFixedBars: true,
   cache: { ttlDays: 90, maxMB: 20 },
 };
 
@@ -42,7 +46,9 @@ const updateSettings = vi.fn(
   async (patch: SettingsPatch): Promise<Settings> => ({
     ...DEFAULT_SETTINGS,
     ...patch,
-    cache: patch.cache ? { ...DEFAULT_SETTINGS.cache, ...patch.cache } : DEFAULT_SETTINGS.cache,
+    cache: patch.cache
+      ? { ...DEFAULT_SETTINGS.cache, ...patch.cache }
+      : DEFAULT_SETTINGS.cache,
     autoSites: patch.autoSites ?? DEFAULT_SETTINGS.autoSites,
   }),
 );
@@ -54,7 +60,10 @@ const onSettingsChanged = vi.fn((listener: (settings: Settings) => void) => {
 
 function deps(overrides: Partial<OptionsDeps> = {}): OptionsDeps {
   return {
-    uiRequest: vi.fn(async () => ({ ok: true, models: ['model-a', 'free:free'] })),
+    uiRequest: vi.fn(async () => ({
+      ok: true,
+      models: ['model-a', 'free:free'],
+    })),
     getSettings,
     updateSettings,
     onSettingsChanged,
@@ -93,13 +102,16 @@ test('filterOptionsCommands drops entries without manifest command names', () =>
 test('helper guards provider base URLs', () => {
   expect(isHttpProviderBaseUrl('https://api.example.com/v1')).toBe(true);
   expect(isHttpProviderBaseUrl('ftp://api.example.com')).toBe(false);
-  expect(isHttpProviderBaseUrl('https://user:pass@api.example.com')).toBe(false);
+  expect(isHttpProviderBaseUrl('https://user:pass@api.example.com')).toBe(
+    false,
+  );
 });
 
 test('filterOpenRouterModels keeps only :free models when requested', () => {
-  expect(
-    filterOpenRouterModels(['a:free', 'b:paid', 'c:free'], true),
-  ).toEqual(['a:free', 'c:free']);
+  expect(filterOpenRouterModels(['a:free', 'b:paid', 'c:free'], true)).toEqual([
+    'a:free',
+    'c:free',
+  ]);
 });
 
 test('formatModelLabel marks free OpenRouter ids', () => {
@@ -121,10 +133,7 @@ test('parseCacheField requires positive finite numbers', () => {
 });
 
 test('pickDefaultModel prefers selectModelOptions order over raw list', () => {
-  const available = [
-    'gemini-3.1-flash-lite',
-    'gemini-3.1-pro-preview',
-  ];
+  const available = ['gemini-3.1-flash-lite', 'gemini-3.1-pro-preview'];
   expect(pickDefaultModel('gemini', 'groq', available, false)).toBe(
     'gemini-3.1-pro-preview',
   );
@@ -132,12 +141,7 @@ test('pickDefaultModel prefers selectModelOptions order over raw list', () => {
 
 test('listModelChoices filters OpenRouter free models', () => {
   expect(
-    listModelChoices(
-      'preset',
-      'openrouter',
-      ['a:free', 'b:paid'],
-      true,
-    ),
+    listModelChoices('preset', 'openrouter', ['a:free', 'b:paid'], true),
   ).toEqual(['a:free']);
 });
 
@@ -182,7 +186,9 @@ test('isEngineModelAllowed rejects preset models outside filtered choices', () =
   expect(
     isEngineModelAllowed('preset', 'openrouter', 'x:free', ['x:free'], true),
   ).toBe(true);
-  expect(isEngineModelAllowed('custom', 'groq', 'any-id', [], false)).toBe(true);
+  expect(isEngineModelAllowed('custom', 'groq', 'any-id', [], false)).toBe(
+    true,
+  );
   expect(isEngineModelAllowed('openai', 'groq', 'm', [], false)).toBe(false);
 });
 
@@ -361,6 +367,7 @@ test('providerFingerprint ignores language and cache fields', () => {
     targetLang: 'ko',
     autoSites: [],
     displayMode: 'bilingual' as const,
+    skipFixedBars: true,
     cache: { ttlDays: 90, maxMB: 20 },
   };
   expect(providerFingerprint({ ...base, targetLang: 'en' })).toBe(
@@ -402,6 +409,7 @@ test('onSettingsChanged keeps unsaved api key when provider fingerprint matches'
     targetLang: 'ko',
     autoSites: [],
     displayMode: 'bilingual',
+    skipFixedBars: true,
     cache: { ttlDays: 90, maxMB: 20 },
   };
   getSettings.mockResolvedValue(stored);
@@ -435,6 +443,7 @@ test('toggles API key visibility', async () => {
     targetLang: 'ko',
     autoSites: [],
     displayMode: 'bilingual',
+    skipFixedBars: true,
     cache: { ttlDays: 90, maxMB: 20 },
   } satisfies Settings);
   const root = document.createElement('div');
@@ -470,6 +479,7 @@ test('keeps saved OpenRouter model before listModels', async () => {
     targetLang: 'ko',
     autoSites: [],
     displayMode: 'bilingual',
+    skipFixedBars: true,
     cache: { ttlDays: 90, maxMB: 20 },
   } satisfies Settings);
   const root = document.createElement('div');
@@ -492,6 +502,7 @@ test('custom engine always uses text model input', async () => {
     targetLang: 'ko',
     autoSites: [],
     displayMode: 'bilingual',
+    skipFixedBars: true,
     cache: { ttlDays: 90, maxMB: 20 },
   } satisfies Settings);
   const root = document.createElement('div');
@@ -502,6 +513,45 @@ test('custom engine always uses text model input', async () => {
       'text',
     ),
   );
+});
+
+test('skip fixed bars checkbox reflects settings and saves on toggle', async () => {
+  getSettings.mockResolvedValue({
+    ...DEFAULT_SETTINGS,
+    skipFixedBars: true,
+  });
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  render(<OptionsApp deps={deps()} />, root);
+  await vi.waitFor(() => {
+    const checkbox = root.querySelector(
+      '#lp-skip-fixed-bars',
+    ) as HTMLInputElement;
+    expect(checkbox?.checked).toBe(true);
+  });
+  const checkbox = root.querySelector(
+    '#lp-skip-fixed-bars',
+  ) as HTMLInputElement;
+  checkbox.click();
+  await vi.waitFor(() =>
+    expect(updateSettings).toHaveBeenCalledWith({ skipFixedBars: false }),
+  );
+});
+
+test('skip fixed bars checkbox starts unchecked when disabled in settings', async () => {
+  getSettings.mockResolvedValue({
+    ...DEFAULT_SETTINGS,
+    skipFixedBars: false,
+  });
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  render(<OptionsApp deps={deps()} />, root);
+  await vi.waitFor(() => {
+    const checkbox = root.querySelector(
+      '#lp-skip-fixed-bars',
+    ) as HTMLInputElement;
+    expect(checkbox?.checked).toBe(false);
+  });
 });
 
 test('renders Korean command labels', async () => {

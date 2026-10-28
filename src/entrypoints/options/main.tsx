@@ -385,6 +385,25 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
         </button>
       </section>
 
+      <section aria-label={strings.options.advanced}>
+        <h2>{strings.options.advanced}</h2>
+        <label class="options__row" for="lp-skip-fixed-bars">
+          <input
+            id="lp-skip-fixed-bars"
+            type="checkbox"
+            checked={settings.skipFixedBars}
+            disabled={busy}
+            onChange={(event) =>
+              void saveGeneral({
+                skipFixedBars: (event.currentTarget as HTMLInputElement).checked,
+              })
+            }
+          />
+          {strings.options.skipFixedBars}
+        </label>
+        <p class="options__notice">{strings.options.skipFixedBarsHint}</p>
+      </section>
+
       <section aria-label={strings.options.shortcuts}>
         <h2>{strings.options.shortcuts}</h2>
         <p class="options__hint">{strings.options.shortcutsHint}</p>

@@ -81,7 +81,25 @@ export class SegmentRenderer {
         style.display,
       ) ||
       (style.display === 'flex' && style.flexDirection.startsWith('column'));
-    node.dataset.lpDisplay = block ? 'block' : 'inline';
+    const size = parseFloat(record.fontSize) || 16;
+    const lineHeight = parseFloat(record.lineHeight) || size * 1.2;
+    const height = record.segment.block.getBoundingClientRect().height;
+    const compact =
+      [...record.segment.text.replace(/\s+/gu, ' ').trim()].length <= 40 &&
+      height > 0 &&
+      height <= lineHeight * 1.6;
+    node.dataset.lpDisplay = compact ? 'compact' : block ? 'block' : 'inline';
+    if (
+      style.display === 'flex' ||
+      style.display === 'grid' ||
+      style.display === 'inline-flex' ||
+      style.display === 'inline-grid'
+    )
+      node.dataset.lpLayout =
+        style.display.includes('grid') ||
+        !style.flexDirection.startsWith('column')
+          ? 'horizontal'
+          : 'vertical';
     node.style.setProperty('--lp-fs', record.fontSize || '16px');
     node.style.setProperty('--lp-lh', record.lineHeight || 'normal');
     if (state === 'ready') {

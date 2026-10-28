@@ -33,6 +33,7 @@ const mode = (autoEnabled = true, revision = 0): BackgroundMessage => ({
   autoEnabled,
   revision,
   configured: true,
+  skipFixedBars: true,
 });
 const nextScan = async () => {
   await vi.advanceTimersByTimeAsync(350);

@@ -602,3 +602,80 @@ test('options and popup controls use the real background API without exposing ke
     await rm(profile, { recursive: true, force: true });
   }
 });
+
+test('Next.js sticky header is skipped and short sidebar labels render compact', async () => {
+  const profile = await mkdtemp(path.resolve('.output/e2e-profile-'));
+  const context = await chromium.launchPersistentContext(profile, {
+    channel: 'chromium',
+    headless: true,
+    viewport: { width: 1100, height: 700 },
+    args: [
+      `--disable-extensions-except=${extension}`,
+      `--load-extension=${extension}`,
+    ],
+  });
+  try {
+    await context.route('**/*', (route) =>
+      route.request().url().startsWith(origin) ||
+      route.request().url().startsWith('chrome-extension:')
+        ? route.continue()
+        : route.abort(),
+    );
+    const page = context.pages()[0] ?? (await context.newPage());
+    await page.goto(`${origin}/nextjs`);
+    const header = page.locator('header').first();
+    const before = await header.evaluate(
+      (element) => element.getBoundingClientRect().height,
+    );
+    console.log('header height', before);
+    expect(before).toBeLessThanOrEqual(120);
+    await settled(page);
+    expect(
+      await header.evaluate(
+        (element) => element.getBoundingClientRect().height,
+      ),
+    ).toBe(before);
+    await expect(header.locator('lp-t')).toHaveCount(0);
+    await expect(
+      page.locator('aside lp-t[data-lp-display="compact"]').first(),
+    ).toBeVisible();
+    const tooNarrow = await page
+      .locator('lp-t[data-lp-state="ready"]')
+      .evaluateAll(
+        (nodes) =>
+          nodes.filter((node) => {
+            const style = getComputedStyle(node);
+            const width = node.getBoundingClientRect().width;
+            return (
+              (node.textContent?.trim().length ?? 0) >= 2 &&
+              width > 0 &&
+              width < parseFloat(style.fontSize) * 2
+            );
+          }).length,
+      );
+    expect(tooNarrow).toBe(0);
+    await page.screenshot({ path: '.output/layout-nextjs.png' });
+    const worker =
+      context.serviceWorkers()[0] ??
+      (await context.waitForEvent('serviceworker'));
+    const options = await context.newPage();
+    await options.goto(
+      `${worker.url().split('/').slice(0, 3).join('/')}/options.html`,
+    );
+    const toggle = options.getByRole('checkbox', {
+      name: '상단 고정 바 건너뛰기',
+    });
+    await expect(toggle).toBeChecked();
+    await toggle.uncheck();
+    await expect.poll(() => header.locator('lp-t').count()).toBeGreaterThan(0);
+    await toggle.check();
+    await expect(header.locator('lp-t')).toHaveCount(0);
+    await options.close();
+    await page.goto(`${origin}/a`);
+    await settled(page);
+    await page.screenshot({ path: '.output/layout-react.png' });
+  } finally {
+    await context.close();
+    await rm(profile, { recursive: true, force: true });
+  }
+});

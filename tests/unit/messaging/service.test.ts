@@ -23,6 +23,7 @@ const settings: Settings = {
   targetLang: 'ko',
   autoSites: ['site.test'],
   displayMode: 'bilingual',
+  skipFixedBars: true,
   cache: { ttlDays: 90, maxMB: 20 },
 };
 function port(tabId: number) {

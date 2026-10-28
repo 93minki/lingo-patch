@@ -82,6 +82,7 @@ test('normalizeSettings merges defaults for corrupted fields', () => {
     }),
   ).toEqual({
     provider: null,
+    skipFixedBars: true,
     targetLang: 'ko',
     autoSites: [],
     displayMode: 'bilingual',
@@ -217,4 +218,10 @@ test('onSettingsChanged unsubscribes and reacts to storage updates', async () =>
     'local',
   );
   expect(seen).toEqual(['ja']);
+});
+
+test('fixed bar setting defaults on, preserves false and ignores damaged values', async () => {
+  expect(normalizeSettings({}).skipFixedBars).toBe(true);
+  expect(normalizeSettings({ skipFixedBars: false }).skipFixedBars).toBe(false);
+  expect(normalizeSettings({ skipFixedBars: 'bad' }).skipFixedBars).toBe(true);
 });

@@ -103,6 +103,10 @@ export const strings = {
     deleteSitePlaceholder: 'https://example.com',
     clearCache: '전체 삭제',
     clearCacheConfirm: '모든 번역 캐시를 삭제할까요?',
+    advanced: '고급',
+    skipFixedBars: '상단 고정 바 건너뛰기',
+    skipFixedBarsHint:
+      '높이가 낮은 sticky·fixed 헤더·툴바 안의 문장은 번역하지 않습니다.',
     shortcuts: '단축키',
     shortcutsHint:
       '브라우저 확장 프로그램 단축키 설정에서 Alt+A, Alt+S 등을 변경할 수 있습니다.',

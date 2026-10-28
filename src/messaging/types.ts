@@ -38,6 +38,7 @@ export type BackgroundMessage = { generation: number } & (
       autoEnabled: boolean;
       revision: number;
       configured: boolean;
+      skipFixedBars: boolean;
     }
   | { type: 'toggle' }
   | { type: 'retranslate' }

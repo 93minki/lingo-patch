@@ -8,6 +8,7 @@ import { createProgress } from './progress';
 import type { BackgroundMessage, PagePayload } from '../messaging/types';
 import { SegmentRenderer, type RenderRecord } from './renderer';
 import { ensureStyle } from './style';
+import { createFixedBarFilter } from './fixed-bars';
 import { isContentPing } from '../messaging/content-ping';
 
 declare global {
@@ -27,6 +28,7 @@ export function startPagePipeline() {
   const translated = new Set<string>();
   let error: ProviderError['kind'] | 'unconfigured' | undefined;
   let configured = false;
+  let skipFixedBars = true;
   let forceAll = false;
   const progress = createProgress(document, () => {
     void uiRequest({ type: 'openOptions' }).catch(() => {});
@@ -80,16 +82,19 @@ export function startPagePipeline() {
       return;
     }
     const epoch = generation;
+    const excluded = createFixedBarFilter(document);
     const keys = [
       ...new Set(
         await Promise.all(
-          findSegments(document.body, { targetLang }).map((segment) =>
-            makeCacheKey({
-              markup: segment.markup,
-              targetLang,
-              promptVersion: PROMPT_VERSION,
-            }),
-          ),
+          findSegments(document.body, { targetLang })
+            .filter((segment) => !skipFixedBars || !excluded(segment.block))
+            .map((segment) =>
+              makeCacheKey({
+                markup: segment.markup,
+                targetLang,
+                promptVersion: PROMPT_VERSION,
+              }),
+            ),
         ),
       ),
     ];
@@ -183,7 +188,10 @@ export function startPagePipeline() {
     scanning = true;
     const epoch = generation;
     try {
-      const segments = findSegments(document.body, { targetLang });
+      const excluded = createFixedBarFilter(document);
+      const segments = findSegments(document.body, { targetLang }).filter(
+        (segment) => !skipFixedBars || !excluded(segment.block),
+      );
       const keyed = await Promise.all(
         segments.map(async (segment) => ({
           segment,
@@ -307,6 +315,8 @@ export function startPagePipeline() {
   const receive = (message: BackgroundMessage) => {
     if (message.type === 'mode') {
       const wasEnabled = enabled;
+      const fixedChanged = skipFixedBars !== message.skipFixedBars;
+      skipFixedBars = message.skipFixedBars;
       configured = message.configured;
       const changed =
         !connected ||
@@ -323,7 +333,7 @@ export function startPagePipeline() {
       );
       const wasConnected = connected;
       connected = true;
-      if (changed || !wasConnected || enabled !== wasEnabled)
+      if (changed || fixedChanged || !wasConnected || enabled !== wasEnabled)
         reset(wasEnabled && !enabled);
       else if (!enabled) clear();
       return;
@@ -390,12 +400,10 @@ export function startPagePipeline() {
       port.onDisconnect.addListener(() => {
         connected = false;
         requested.clear();
-        if (!disposed && started)
-          reconnectTimer = setTimeout(connect, 100);
+        if (!disposed && started) reconnectTimer = setTimeout(connect, 100);
       });
     } catch {
-      if (!disposed && started)
-        reconnectTimer = setTimeout(connect, 1000);
+      if (!disposed && started) reconnectTimer = setTimeout(connect, 1000);
     }
   };
   const begin = () => {
@@ -453,7 +461,8 @@ export function startPagePipeline() {
     window.removeEventListener('pageshow', onPageshow);
     document.removeEventListener('prerenderingchange', onPrerenderingChange);
     browser.runtime.onMessage.removeListener(onPing);
-    if (window.__lpPipelineDispose === dispose) delete window.__lpPipelineDispose;
+    if (window.__lpPipelineDispose === dispose)
+      delete window.__lpPipelineDispose;
   };
   window.__lpPipelineDispose = dispose;
   return dispose;

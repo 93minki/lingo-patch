@@ -62,6 +62,7 @@ export function createPageService(
       autoEnabled: settings.autoSites.includes(connection.hostname),
       revision,
       configured: Boolean(settings.provider),
+      skipFixedBars: settings.skipFixedBars,
     });
   const status = (connection: Connection): TabStatus => ({
     ...connection.stats,

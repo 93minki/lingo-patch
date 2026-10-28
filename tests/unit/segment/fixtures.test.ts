@@ -12,6 +12,7 @@ const fixtures = [
   'docusaurus-intro',
   'vitepress-guide',
   'rust-book-ch01',
+  'nextjs-docs',
 ];
 
 function markupWithoutPlaceholders(markup: string): string {
@@ -47,6 +48,12 @@ test.each(fixtures)(
     const html = readFileSync(`tests/fixtures/${name}.html`, 'utf8');
     expect(Buffer.byteLength(html)).toBeLessThanOrEqual(300 * 1024);
     expect(html).not.toMatch(/<(?:script|style|link|noscript|iframe)\b|<!--/iu);
+    if (name === 'nextjs-docs') {
+      expect(html).toMatch(/sticky top-0|class="sticky top-0/i);
+      expect(html).toContain('Primary navigation');
+      expect(html).toContain('Copy page');
+      expect(html).toMatch(/aria-label="Documentation"/);
+    }
     document.body.innerHTML = html;
     const before = document.body.innerHTML;
     const start = performance.now();

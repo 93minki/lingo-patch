@@ -6,6 +6,7 @@ export interface Settings {
   provider: ProviderConfig | null;
   preset?: PresetId;
   targetLang: string;
+  skipFixedBars: boolean;
   autoSites: string[];
   displayMode: 'bilingual' | 'translation' | 'original';
   cache: { ttlDays: number; maxMB: number };
@@ -35,6 +36,7 @@ const DISPLAY_MODES: Settings['displayMode'][] = [
 export const DEFAULT_SETTINGS: Settings = {
   provider: null,
   targetLang: 'ko',
+  skipFixedBars: true,
   autoSites: [],
   displayMode: 'bilingual',
   cache: { ttlDays: 90, maxMB: 20 },
@@ -52,6 +54,7 @@ function cloneSettings(settings: Settings): Settings {
   const cloned: Settings = {
     provider: settings.provider ? { ...settings.provider } : null,
     targetLang: settings.targetLang,
+    skipFixedBars: settings.skipFixedBars,
     autoSites: [...settings.autoSites],
     displayMode: settings.displayMode,
     cache: cloneCache(settings.cache),
@@ -150,6 +153,8 @@ export function normalizeSettings(raw: unknown): Settings {
       typeof raw.targetLang === 'string' && raw.targetLang.trim() !== ''
         ? raw.targetLang
         : DEFAULT_SETTINGS.targetLang,
+    skipFixedBars:
+      typeof raw.skipFixedBars === 'boolean' ? raw.skipFixedBars : true,
     autoSites: parseStringArray(raw.autoSites, DEFAULT_SETTINGS.autoSites),
     displayMode: parseDisplayMode(raw.displayMode),
     cache: parseCache(raw.cache),
