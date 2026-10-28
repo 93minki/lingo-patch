@@ -1,7 +1,12 @@
+html,
+body {
+  width: 340px;
+  margin: 0;
+}
+
 .popup {
   box-sizing: border-box;
   width: 340px;
-  max-width: 100vw;
   min-height: 120px;
   padding: 14px 16px 16px;
   margin: 0;
