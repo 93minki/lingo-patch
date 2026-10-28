@@ -63,7 +63,7 @@ npm run typecheck && npm run lint && npm test && npm run build && npm run build:
 1. **작업 범위**: `lingo-patch` 저장소 루트(`/Users/93minki/Desktop/Study/lingo-patch`) 안의 파일만 생성·수정한다. 전역 설치(`npm i -g`, `corepack enable`, brew 등)와 홈 디렉터리 설정 변경은 하지 않는다. npm의 기본 캐시(`~/.npm`)와 시스템 임시 폴더는 그대로 사용해도 된다 (프로젝트 안에 캐시 폴더를 만들지 않는다).
 2. **Git**: Opus 검수·사용자 승인 전까지 **커밋·브랜치 생성 등 git 쓰기 작업을 하지 않는다.** (`git status` / `git diff` 읽기는 가능)
 3. **설계 문서**: `docs/DESIGN.md`는 구현자가 수정하지 않는다. 설계와 다르게 구현해야 하면 보고에 이유를 적는다.
-4. **`src/core/`**: DOM·`window`·`browser` 등 브라우저 API에 의존하지 않는 순수 로직만 둔다. 브라우저 연동은 `src/content/`, `src/storage/`, `src/platform/`, 엔트리포인트 등에서 처리한다.
+4. **`src/core/`**: 전역 객체(`document`, `window`, `browser`/`chrome`, `fetch`, `indexedDB`)를 직접 참조하지 않는다. DOM 노드는 **인자로 받은 것만** 표준 DOM API로 다룬다 (happy-dom으로 테스트 가능해야 함). 브라우저 연동은 `src/content/`, `src/storage/`, `src/platform/`, 엔트리포인트에서 처리한다.
 5. **페이지 DOM**: 원본 페이지의 **텍스트 노드는 수정하지 않는다.** 번역문은 `<lp-t>` 등으로 덧붙이기만 한다 (`docs/DESIGN.md` §5.3).
 6. **테스트**: 새 코드는 단위 테스트를 함께 추가한다. 단위 테스트는 `tests/unit/`에 둔다.
 7. **패키지 매니저**: npm. 의존성은 호환되는 안정 버전을 쓰고 `package-lock.json`을 유지한다. TypeScript는 typescript-eslint 지원 범위에 맞춰 6.0.x를 사용한다. 의존성을 갱신할 때 지원 범위를 다시 확인한다.

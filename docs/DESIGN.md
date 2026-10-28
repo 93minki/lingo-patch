@@ -103,15 +103,16 @@ API 키와 IndexedDB는 **background에만** 둔다. content script는 페이지
 - 사이트별 CSS 선택자로 포함/제외 규칙 추가 가능 (주요 문서 사이트용 기본 규칙 제공: Docusaurus, VitePress, MDN, Nextra, mdBook, Sphinx)
 
 ### 5.2 인라인 요소 보존
-블록 안의 인라인 요소는 자리표시 태그로 바꿔 보낸다:
+블록 안의 인라인 요소는 자리표시 태그로 바꿔 보낸다. 번호 N은 세그먼트 안에서 등장 순서대로 0부터 매긴다.
 ```
-원문 DOM:  Call <code>useState</code> at the <a href="#top">top level</a>.
-전송 텍스트: Call <c0/> at the <a1>top level</a1>.
-응답:      <a1>최상위</a1>에서 <c0/>을 호출하세요.
+원문 DOM:   Call <code>useState</code> at the <a href="#top">top level</a>.
+전송 텍스트: Call <x0/> at the <g1>top level</g1>.
+응답:       <g1>최상위</g1>에서 <x0/>을 호출하세요.
 ```
-- `code`, `kbd`, `img` 같은 원자 요소 → `<cN/>` (원본 노드를 복제해서 그대로 다시 넣음, 번역하지 않음)
-- `a, em, strong, b, i, mark, span` → `<aN>…</aN>` (원본 요소의 얕은 복제에 번역된 자식을 넣음)
-- 검증: 응답의 자리표시 집합이 원문과 다르면 태그를 빼고 텍스트만 렌더링 (실패 처리 안 함)
+- **원자 요소** `<xN/>`: `code, kbd, samp, var, img, br, svg, math, input`, 알 수 없는 요소(커스텀 엘리먼트, button 등). 원본 노드를 깊은 복제해 그대로 다시 넣는다 (번역하지 않음)
+- **쌍 요소** `<gN>…</gN>`: `a, em, strong, b, i, u, s, mark, span, abbr, small, sub, sup, q, cite, del, ins, time`. 원본 요소의 얕은 복제(`cloneNode(false)`)에 번역된 자식을 넣는다
+- 텍스트 안의 `< > &`는 `&lt; &gt; &amp;`로 이스케이프한다
+- 검증: 응답의 자리표시 집합이나 중첩 구조가 원문과 다르면 태그를 모두 빼고 텍스트만 렌더링한다 (실패로 처리하지 않음)
 
 ### 5.3 삽입 방식
 - 원본 텍스트 노드는 **절대 수정하지 않는다.** 블록 요소의 마지막 자식으로 `<lp-t>` 커스텀 요소를 붙인다
@@ -260,7 +261,7 @@ lingo-patch/
 │  │  ├─ content/index.ts
 │  │  ├─ popup/
 │  │  └─ options/
-│  ├─ core/                 # 순수 로직, DOM/브라우저 API에 의존하지 않음 → 단위 테스트 대상
+│  ├─ core/                 # 순수 로직. 전역 객체 금지, 인자로 받은 DOM 노드만 다룸 → 단위 테스트 대상
 │  │  ├─ segment/           # 세그먼트 분리, 자리표시 직렬화/역직렬화
 │  │  ├─ cache/             # 키 생성, 정리 정책
 │  │  ├─ queue/             # 배치·우선순위·dedupe
