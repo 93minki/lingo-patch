@@ -6,7 +6,10 @@ import {
   type UiRequest,
   type UiResponse,
 } from '../../messaging/extension';
-import { requestProviderPermission } from '../../platform/permissions';
+import {
+  hasProviderAccess,
+  requestProviderAccess,
+} from '../../platform/host-access';
 import {
   getSettings,
   onSettingsChanged,
@@ -122,7 +125,8 @@ export type OptionsDeps = {
   getSettings: typeof getSettings;
   updateSettings: typeof updateSettings;
   onSettingsChanged: typeof onSettingsChanged;
-  requestProviderPermission: typeof requestProviderPermission;
+  hasProviderAccess: typeof hasProviderAccess;
+  requestProviderAccess: typeof requestProviderAccess;
   getCommands: () => Promise<{ name?: string; shortcut?: string }[]>;
   confirm: (message: string) => boolean;
 };
@@ -323,7 +327,8 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
           uiRequest: deps.uiRequest,
           updateSettings: deps.updateSettings,
           getSettings: deps.getSettings,
-          requestProviderPermission: deps.requestProviderPermission,
+          hasProviderAccess: deps.hasProviderAccess,
+          requestProviderAccess: deps.requestProviderAccess,
           getApiKey,
           setApiKey,
           clearApiKey,
@@ -604,7 +609,8 @@ if (appRoot && !import.meta.env.VITEST) {
         getSettings,
         updateSettings,
         onSettingsChanged,
-        requestProviderPermission,
+        hasProviderAccess,
+        requestProviderAccess,
         getCommands: async () =>
           filterOptionsCommands(await browser.commands.getAll()),
         confirm: (message) => window.confirm(message),

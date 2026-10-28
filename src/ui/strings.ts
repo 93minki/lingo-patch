@@ -15,6 +15,10 @@ export const strings = {
     loading: '불러오는 중…',
     checking: '확인 중…',
     unavailable: '이 페이지는 번역할 수 없습니다',
+    needPageAccess:
+      'Firefox에서는 이 사이트에 접근할 수 있도록 허용해야 번역이 동작합니다.',
+    allowThisSite: '이 사이트 접근 허용',
+    allowAllSites: '모든 사이트 허용',
     configure: '번역 설정하기',
     autoSite: '이 사이트 항상 번역',
     translateOn: '지금 번역',
@@ -128,6 +132,7 @@ export const strings = {
       '브라우저 확장 프로그램 단축키 설정에서 Alt+A, Alt+S 등을 변경할 수 있습니다.',
     shortcutsPage: '단축키 설정 열기',
     permissionDenied: '호스트 권한이 거부되어 저장하지 않았습니다.',
+    allowApiAccess: 'API 접근 허용',
     pickModel: '모델을 선택하세요',
     validateModelsFirst: '「키 확인」을 실행한 뒤 모델을 선택하세요.',
     invalidKey: 'API 키를 입력하세요.',

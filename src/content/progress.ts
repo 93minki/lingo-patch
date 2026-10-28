@@ -78,11 +78,28 @@ export function createProgress(
   }
   const root = host.shadowRoot ?? host.attachShadow({ mode: 'open' });
   if (!root.querySelector('style')) {
-    root.innerHTML = `<style>${PROGRESS_CSS}</style>
-<div class="pill" part="pill" role="status" aria-live="polite">
-  <span class="message"></span>
-  <button type="button" class="open-options" hidden>${strings.progress.openSettings}</button>
-</div>`;
+    const style = doc.createElement('style');
+    style.textContent = PROGRESS_CSS;
+    root.appendChild(style);
+
+    const pillEl = doc.createElement('div');
+    pillEl.className = 'pill';
+    pillEl.setAttribute('part', 'pill');
+    pillEl.setAttribute('role', 'status');
+    pillEl.setAttribute('aria-live', 'polite');
+
+    const messageEl = doc.createElement('span');
+    messageEl.className = 'message';
+    pillEl.appendChild(messageEl);
+
+    const linkEl = doc.createElement('button');
+    linkEl.type = 'button';
+    linkEl.className = 'open-options';
+    linkEl.hidden = true;
+    linkEl.textContent = strings.progress.openSettings;
+    pillEl.appendChild(linkEl);
+
+    root.appendChild(pillEl);
   }
 
   const pill = root.querySelector('.pill') as HTMLDivElement;

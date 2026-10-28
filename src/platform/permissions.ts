@@ -1,4 +1,4 @@
-import { browser } from 'wxt/browser';
+import { requestAccess } from './host-access';
 
 export function providerOrigin(baseUrl: string): string {
   const url = new URL(baseUrl);
@@ -13,7 +13,6 @@ export function providerOrigin(baseUrl: string): string {
 export async function requestProviderPermission(
   baseUrl: string,
 ): Promise<boolean> {
-  const origins = [providerOrigin(baseUrl)];
-  // Called directly from the options click handler to retain the user gesture.
-  return browser.permissions.request({ origins });
+  // Called directly from a click handler to retain the user gesture.
+  return requestAccess({ providers: [baseUrl] });
 }

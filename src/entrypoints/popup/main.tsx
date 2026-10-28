@@ -8,7 +8,13 @@ import type {
 } from '../../messaging/extension';
 import { uiRequest } from '../../messaging/extension';
 import type { DisplayMode } from '../../messaging/types';
-import { requestProviderPermission } from '../../platform/permissions';
+import { translatableUrl } from '../../messaging/api';
+import {
+  hasPageAccess,
+  hasProviderAccess,
+  requestPageAccess,
+  requestProviderAccess,
+} from '../../platform/host-access';
 import {
   openOptionsTab,
   type OptionsSection,
@@ -28,14 +34,17 @@ import './popup.css';
 export type PopupView = 'main' | 'settings';
 
 export type PopupDeps = {
-  queryActiveTab: () => Promise<{ id: number } | undefined>;
+  queryActiveTab: () => Promise<{ id: number; url?: string } | undefined>;
   uiRequest: (request: UiRequest) => Promise<UiResponse>;
   confirm: (message: string) => boolean;
   openOptionsPage: (section?: OptionsSection) => void | Promise<void>;
   getSettings: typeof getSettings;
   updateSettings: typeof updateSettings;
   onSettingsChanged: typeof onSettingsChanged;
-  requestProviderPermission: typeof requestProviderPermission;
+  hasPageAccess: typeof hasPageAccess;
+  requestPageAccess: typeof requestPageAccess;
+  hasProviderAccess: typeof hasProviderAccess;
+  requestProviderAccess: typeof requestProviderAccess;
 };
 
 const POLL_MS = 500;
@@ -172,7 +181,8 @@ function PopupSettingsView({
             uiRequest: deps.uiRequest,
             updateSettings: deps.updateSettings,
             getSettings: deps.getSettings,
-            requestProviderPermission: deps.requestProviderPermission,
+            hasProviderAccess: deps.hasProviderAccess,
+            requestProviderAccess: deps.requestProviderAccess,
             getApiKey,
             setApiKey,
             clearApiKey,
@@ -214,6 +224,10 @@ function PopupSettingsView({
 export function PopupApp({ deps }: { deps: PopupDeps }) {
   const [view, setView] = useState<PopupView>('main');
   const [tabId, setTabId] = useState<number | null | undefined>(undefined);
+  const [tabUrl, setTabUrl] = useState<string | undefined>();
+  const [pageAccessGranted, setPageAccessGranted] = useState<
+    boolean | undefined
+  >();
   const [status, setStatus] = useState<TabStatus | undefined>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -246,10 +260,13 @@ export function PopupApp({ deps }: { deps: PopupDeps }) {
         if (!alive) return;
         if (tab?.id === undefined) {
           setTabId(null);
+          setTabUrl(undefined);
+          setPageAccessGranted(true);
           setStatus(unavailableStatus());
           return;
         }
         setTabId(tab.id);
+        setTabUrl(tab.url);
       })
       .catch(() => {
         if (!alive) return;
@@ -285,12 +302,45 @@ export function PopupApp({ deps }: { deps: PopupDeps }) {
     };
   }, [deps, tabId]);
 
+  useEffect(() => {
+    if (!tabUrl || !translatableUrl(tabUrl)) {
+      setPageAccessGranted(true);
+      return;
+    }
+    let alive = true;
+    const origin = new URL(tabUrl).origin;
+    void deps.hasPageAccess(origin).then((granted) => {
+      if (alive) setPageAccessGranted(granted);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [deps, tabUrl]);
+
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     setError(undefined);
     try {
       await action();
       await refresh();
+    } catch {
+      setError(strings.popup.requestFailed);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const grantPageAccess = async (pages: 'all' | string) => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const granted = await deps.requestPageAccess(pages);
+      if (!granted) return;
+      setPageAccessGranted(true);
+      if (typeof tabId === 'number') {
+        await deps.uiRequest({ type: 'getTabStatus', tabId });
+        await refresh();
+      }
     } catch {
       setError(strings.popup.requestFailed);
     } finally {
@@ -327,7 +377,7 @@ export function PopupApp({ deps }: { deps: PopupDeps }) {
     );
   }
 
-  if (tabId === undefined || !status) {
+  if (tabId === undefined || !status || pageAccessGranted === undefined) {
     return (
       <main class="popup" aria-busy="true">
         <h1 class="popup__title">{strings.popup.title}</h1>
@@ -335,6 +385,43 @@ export function PopupApp({ deps }: { deps: PopupDeps }) {
           {tabId === undefined ? strings.popup.loading : strings.popup.checking}
         </p>
         <PopupSettingsLink busy={false} onOpen={openSettings} />
+      </main>
+    );
+  }
+
+  if (
+    view === 'main' &&
+    typeof tabId === 'number' &&
+    tabUrl &&
+    translatableUrl(tabUrl) &&
+    pageAccessGranted === false
+  ) {
+    const hostname = new URL(tabUrl).hostname;
+    return (
+      <main class="popup" aria-busy={busy}>
+        <h1 class="popup__title">{strings.popup.title}</h1>
+        <p class="popup__host">{hostname}</p>
+        {error ? <p class="popup__error">{error}</p> : null}
+        <p class="popup__message">{strings.popup.needPageAccess}</p>
+        <div class="popup__row">
+          <button
+            type="button"
+            class="popup__btn popup__btn--primary"
+            disabled={busy}
+            onClick={() => void grantPageAccess(new URL(tabUrl).origin)}
+          >
+            {strings.popup.allowThisSite}
+          </button>
+          <button
+            type="button"
+            class="popup__btn popup__btn--ghost"
+            disabled={busy}
+            onClick={() => void grantPageAccess('all')}
+          >
+            {strings.popup.allowAllSites}
+          </button>
+        </div>
+        <PopupSettingsLink busy={busy} onOpen={openSettings} />
       </main>
     );
   }
@@ -513,7 +600,8 @@ if (appRoot && !import.meta.env.VITEST) {
             active: true,
             currentWindow: true,
           });
-          return tab?.id === undefined ? undefined : { id: tab.id };
+          if (tab?.id === undefined) return undefined;
+          return { id: tab.id, url: tab.url };
         },
         uiRequest,
         confirm: (message) => window.confirm(message),
@@ -521,7 +609,10 @@ if (appRoot && !import.meta.env.VITEST) {
         getSettings,
         updateSettings,
         onSettingsChanged,
-        requestProviderPermission,
+        hasPageAccess,
+        requestPageAccess,
+        hasProviderAccess,
+        requestProviderAccess,
       }}
     />,
     appRoot,

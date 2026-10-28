@@ -4,7 +4,7 @@ import { isFreeModel, PRESETS, type PresetId } from '../providers/presets';
 import type { ProviderConfig } from '../providers/types';
 import type { UiRequest, UiResponse } from '../messaging/extension';
 import type { DisplayMode } from '../messaging/types';
-import type { requestProviderPermission } from '../platform/permissions';
+import { requestProviderAccess } from '../platform/host-access';
 import {
   getSettings,
   updateSettings,
@@ -178,7 +178,8 @@ export type SettingsSectionsDeps = {
   uiRequest: (request: UiRequest) => Promise<UiResponse>;
   updateSettings: typeof updateSettings;
   getSettings: typeof getSettings;
-  requestProviderPermission: typeof requestProviderPermission;
+  hasProviderAccess: (baseUrls: string[]) => Promise<boolean>;
+  requestProviderAccess: typeof requestProviderAccess;
   getApiKey?: typeof getApiKeyStorage;
   setApiKey?: typeof setApiKeyStorage;
   clearApiKey?: typeof clearApiKeyStorage;
@@ -274,7 +275,7 @@ export function buildProviderConfig(input: {
 export async function persistEngineSettings(
   deps: Pick<
     SettingsSectionsDeps,
-    'requestProviderPermission' | 'updateSettings' | 'getApiKey' | 'setApiKey'
+    'hasProviderAccess' | 'updateSettings' | 'getApiKey' | 'setApiKey'
   >,
   input: {
     engine: EngineKind;
@@ -295,8 +296,7 @@ export async function persistEngineSettings(
   );
   if (permissionUrl !== undefined) {
     if (!isHttpProviderBaseUrl(permissionUrl)) return 'invalid-url';
-    const granted = await deps.requestProviderPermission(permissionUrl);
-    if (!granted) return 'permission';
+    if (!(await deps.hasProviderAccess([permissionUrl]))) return 'permission';
   }
   const apiKey = await keyForValidation(
     secrets.getApiKey,
@@ -328,7 +328,7 @@ export async function persistEngineSettings(
 }
 
 export async function validateProviderKey(
-  deps: Pick<SettingsSectionsDeps, 'uiRequest' | 'requestProviderPermission'>,
+  deps: Pick<SettingsSectionsDeps, 'uiRequest' | 'hasProviderAccess'>,
   input: {
     engine: EngineKind;
     presetId: PresetId;
@@ -353,8 +353,9 @@ export async function validateProviderKey(
     if (!isHttpProviderBaseUrl(permissionUrl)) {
       return { ok: false, reason: 'invalid-url' };
     }
-    const granted = await deps.requestProviderPermission(permissionUrl);
-    if (!granted) return { ok: false, reason: 'permission' };
+    if (!(await deps.hasProviderAccess([permissionUrl]))) {
+      return { ok: false, reason: 'permission' };
+    }
   }
   const response = await deps.uiRequest({
     type: 'validateProvider',
@@ -426,10 +427,24 @@ export function SettingsSections({
   const [baseUrl, setBaseUrl] = useState('');
   const [freeOnly, setFreeOnly] = useState(false);
   const [models, setModels] = useState<string[]>([]);
+  const [apiAccessGranted, setApiAccessGranted] = useState(true);
   const syncedFingerprint = useRef('');
   const secrets = useMemo(() => resolveSecretsDeps(deps), [deps]);
   const confirmDialog =
     deps.confirm ?? ((message: string) => window.confirm(message));
+
+  const refreshApiAccess = async (
+    nextEngine = engine,
+    nextPreset = presetId,
+    nextBaseUrl = baseUrl,
+  ) => {
+    const permissionUrl = permissionBaseUrl(nextEngine, nextPreset, nextBaseUrl);
+    if (permissionUrl === undefined) {
+      setApiAccessGranted(true);
+      return;
+    }
+    setApiAccessGranted(await deps.hasProviderAccess([permissionUrl]));
+  };
 
   const rowClass = compact ? 'lp-settings-row' : 'options__row';
   const btnClass = compact ? 'lp-settings-btn' : 'options__btn';
@@ -492,6 +507,10 @@ export function SettingsSections({
     return stop;
   }, [engine, presetId]);
 
+  useEffect(() => {
+    void refreshApiAccess();
+  }, [engine, presetId, baseUrl]);
+
   const modelChoices = useMemo(
     () => listModelChoices(engine, presetId, models, freeOnly),
     [engine, presetId, models, freeOnly],
@@ -514,6 +533,22 @@ export function SettingsSections({
       setModel('');
     }
   }, [engine, presetId, freeOnly, model, modelChoices, models.length]);
+
+  const grantApiAccess = async () => {
+    const permissionUrl = permissionBaseUrl(engine, presetId, baseUrl);
+    if (permissionUrl === undefined) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      const granted = await deps.requestProviderAccess(permissionUrl);
+      setApiAccessGranted(granted);
+      if (!granted) setError(strings.options.permissionDenied);
+    } catch {
+      setError(strings.options.requestFailed);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const validateKey = async () => {
     setBusy(true);
@@ -803,6 +838,19 @@ export function SettingsSections({
                 />
                 {strings.options.freeModelsOnly}
               </label>
+            ) : null}
+
+            {!apiAccessGranted ? (
+              <div class={rowClass}>
+                <button
+                  type="button"
+                  class={btnPrimaryClass}
+                  disabled={busy}
+                  onClick={() => void grantApiAccess()}
+                >
+                  {strings.options.allowApiAccess}
+                </button>
+              </div>
             ) : null}
 
             <label for={modelId}>{strings.options.model}</label>

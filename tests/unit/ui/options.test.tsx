@@ -152,7 +152,8 @@ function deps(overrides: Partial<OptionsDeps> = {}): OptionsDeps {
     getSettings,
     updateSettings,
     onSettingsChanged,
-    requestProviderPermission: vi.fn(async () => true),
+    hasProviderAccess: vi.fn(async () => true),
+    requestProviderAccess: vi.fn(async () => true),
     getCommands: vi.fn(async () => [
       { name: 'toggle-translate', shortcut: 'Alt+A' },
       { name: 'cycle-mode', shortcut: 'Alt+S' },
@@ -301,7 +302,7 @@ test('persistEngineSettings rejects OpenRouter free filter with no free models',
   const result = await persistEngineSettings(
     {
       updateSettings,
-      requestProviderPermission: vi.fn(async () => true),
+      hasProviderAccess: vi.fn(async () => true),
       setApiKey,
       getApiKey,
     },
@@ -325,7 +326,7 @@ test('persistEngineSettings allows custom model not returned by listModels', asy
   await persistEngineSettings(
     {
       updateSettings,
-      requestProviderPermission: vi.fn(async () => true),
+      hasProviderAccess: vi.fn(async () => true),
       setApiKey,
       getApiKey,
     },
@@ -356,7 +357,7 @@ test('persistEngineSettings stores empty custom api key separately from missing 
   await persistEngineSettings(
     {
       updateSettings,
-      requestProviderPermission: vi.fn(async () => true),
+      hasProviderAccess: vi.fn(async () => true),
       setApiKey,
       getApiKey,
     },
@@ -380,7 +381,7 @@ test('persistEngineSettings rejects custom saves without permission', async () =
   const result = await persistEngineSettings(
     {
       updateSettings,
-      requestProviderPermission: vi.fn(async () => false),
+      hasProviderAccess: vi.fn(async () => false),
       setApiKey,
       getApiKey,
     },
@@ -404,7 +405,7 @@ test('persistEngineSettings rejects empty api key for native providers', async (
   const result = await persistEngineSettings(
     {
       updateSettings,
-      requestProviderPermission: vi.fn(async () => true),
+      hasProviderAccess: vi.fn(async () => true),
       setApiKey,
       getApiKey,
     },
@@ -431,7 +432,7 @@ test('persistEngineSettings uses stored secret when draft key is blank', async (
   await persistEngineSettings(
     {
       updateSettings,
-      requestProviderPermission: vi.fn(async () => true),
+      hasProviderAccess: vi.fn(async () => true),
       setApiKey,
       getApiKey,
     },
@@ -458,7 +459,7 @@ test('persistEngineSettings clears preset for native providers', async () => {
   await persistEngineSettings(
     {
       updateSettings,
-      requestProviderPermission: vi.fn(async () => true),
+      hasProviderAccess: vi.fn(async () => true),
       setApiKey,
       getApiKey,
     },
@@ -482,10 +483,10 @@ test('persistEngineSettings clears preset for native providers', async () => {
   expect(setApiKey).toHaveBeenCalledWith('openai', 'k');
 });
 
-test('validateProviderKey requests preset permission before validateProvider', async () => {
+test('validateProviderKey requires provider access before validateProvider', async () => {
   const order: string[] = [];
-  const requestProviderPermission = vi.fn(async () => {
-    order.push('permission');
+  const hasProviderAccess = vi.fn(async () => {
+    order.push('check');
     return true;
   });
   const uiRequest = vi.fn(async () => {
@@ -493,7 +494,7 @@ test('validateProviderKey requests preset permission before validateProvider', a
     return { ok: true, models: ['m1'] };
   });
   await validateProviderKey(
-    { uiRequest, requestProviderPermission },
+    { uiRequest, hasProviderAccess },
     {
       engine: 'preset',
       presetId: 'groq',
@@ -502,8 +503,8 @@ test('validateProviderKey requests preset permission before validateProvider', a
       baseUrl: '',
     },
   );
-  expect(order).toEqual(['permission', 'validate']);
-  expect(requestProviderPermission).toHaveBeenCalled();
+  expect(order).toEqual(['check', 'validate']);
+  expect(hasProviderAccess).toHaveBeenCalled();
 });
 
 test('validateProviderKey skips validate when permission denied', async () => {
@@ -511,7 +512,7 @@ test('validateProviderKey skips validate when permission denied', async () => {
   const result = await validateProviderKey(
     {
       uiRequest,
-      requestProviderPermission: vi.fn(async () => false),
+      hasProviderAccess: vi.fn(async () => false),
     },
     {
       engine: 'custom',
@@ -852,4 +853,60 @@ test('clear all keys removes lp-secrets but keeps provider metadata', async () =
   expect(updateSettings).not.toHaveBeenCalledWith(
     expect.objectContaining({ provider: null }),
   );
+});
+
+test('shows API access button when provider permission is missing', async () => {
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  render(
+    <OptionsApp deps={deps({ hasProviderAccess: vi.fn(async () => false) })} />,
+    root,
+  );
+  await vi.waitFor(() => expect(root.querySelector('#lp-engine')).toBeTruthy());
+  const engineSelect = root.querySelector('#lp-engine') as HTMLSelectElement;
+  engineSelect.value = 'preset:groq';
+  engineSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  await vi.waitFor(() =>
+    expect(root.textContent).toContain(strings.options.allowApiAccess),
+  );
+});
+
+test('API access button requests provider permission on click', async () => {
+  let granted = false;
+  const requestProviderAccess = vi.fn(async () => {
+    granted = true;
+    return true;
+  });
+  const hasProviderAccess = vi.fn(async () => granted);
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  render(
+    <OptionsApp deps={deps({ hasProviderAccess, requestProviderAccess })} />,
+    root,
+  );
+  await vi.waitFor(() => expect(root.querySelector('#lp-engine')).toBeTruthy());
+  const engineSelect = root.querySelector('#lp-engine') as HTMLSelectElement;
+  engineSelect.value = 'preset:groq';
+  engineSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  await vi.waitFor(() =>
+    expect(root.textContent).toContain(strings.options.allowApiAccess),
+  );
+  [...root.querySelectorAll('button')]
+    .find((node) => node.textContent === strings.options.allowApiAccess)
+    ?.click();
+  await vi.waitFor(() =>
+    expect(requestProviderAccess).toHaveBeenCalledWith(
+      expect.stringMatching(/^https:\/\//),
+    ),
+  );
+});
+
+test('hides API access button when provider permission is granted', async () => {
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  render(<OptionsApp deps={deps()} />, root);
+  await vi.waitFor(() =>
+    expect(root.textContent).toContain(strings.options.validateKey),
+  );
+  expect(root.textContent).not.toContain(strings.options.allowApiAccess);
 });

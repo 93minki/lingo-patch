@@ -140,9 +140,23 @@ export function createSelectionOverlay(
 
   const root = host.shadowRoot ?? host.attachShadow({ mode: 'open' });
   if (!root.querySelector('style')) {
-    root.innerHTML = `<style>${OVERLAY_CSS}</style>
-<button type="button" class="btn" aria-label="선택한 텍스트 번역">번역</button>
-<div class="popover" role="dialog" aria-label="선택 번역 결과" tabindex="-1"></div>`;
+    const style = doc.createElement('style');
+    style.textContent = OVERLAY_CSS;
+    root.appendChild(style);
+
+    const buttonEl = doc.createElement('button');
+    buttonEl.type = 'button';
+    buttonEl.className = 'btn';
+    buttonEl.setAttribute('aria-label', '선택한 텍스트 번역');
+    buttonEl.textContent = '번역';
+    root.appendChild(buttonEl);
+
+    const popoverEl = doc.createElement('div');
+    popoverEl.className = 'popover';
+    popoverEl.setAttribute('role', 'dialog');
+    popoverEl.setAttribute('aria-label', '선택 번역 결과');
+    popoverEl.tabIndex = -1;
+    root.appendChild(popoverEl);
   }
 
   const button = root.querySelector('.btn') as HTMLButtonElement;

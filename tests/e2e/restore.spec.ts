@@ -584,6 +584,13 @@ test('options and popup controls use the real background API without exposing ke
     await options
       .getByLabel('API 키', { exact: true })
       .fill('local-fake-secret');
+    const grantApiAccess = options.getByRole('button', {
+      name: 'API 접근 허용',
+      exact: true,
+    });
+    if (await grantApiAccess.isVisible()) {
+      await grantApiAccess.click();
+    }
     await options.getByRole('button', { name: '키 확인', exact: true }).click();
     await expect(
       options.getByText('키가 확인되었습니다', { exact: true }),

@@ -151,7 +151,8 @@ function createSettingsDeps(initial: Settings = DEFAULT_SETTINGS) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     }),
-    requestProviderPermission: vi.fn(async () => true),
+    requestProviderAccess: vi.fn(async () => true),
+    hasProviderAccess: vi.fn(async () => true),
     get current() {
       return current;
     },
@@ -163,25 +164,37 @@ function mount(
   confirm = vi.fn(() => true),
   openOptionsPage = vi.fn(),
   settingsDeps = createSettingsDeps(),
+  access = {
+    hasPageAccess: vi.fn(async () => true),
+    requestPageAccess: vi.fn(async () => true),
+    hasProviderAccess: settingsDeps.hasProviderAccess,
+    requestProviderAccess: settingsDeps.requestProviderAccess,
+  },
 ) {
   const root = document.createElement('div');
   document.body.appendChild(root);
   render(
     <PopupApp
       deps={{
-        queryActiveTab: async () => ({ id: 7 }),
+        queryActiveTab: async () => ({
+          id: 7,
+          url: 'https://docs.example.com/page',
+        }),
         uiRequest,
         confirm,
         openOptionsPage,
         getSettings: settingsDeps.getSettings,
         updateSettings: settingsDeps.updateSettings,
         onSettingsChanged: settingsDeps.onSettingsChanged,
-        requestProviderPermission: settingsDeps.requestProviderPermission,
+        hasPageAccess: access.hasPageAccess,
+        requestPageAccess: access.requestPageAccess,
+        hasProviderAccess: access.hasProviderAccess,
+        requestProviderAccess: access.requestProviderAccess,
       }}
     />,
     root,
   );
-  return { root, openOptionsPage, settingsDeps };
+  return { root, openOptionsPage, settingsDeps, access };
 }
 
 beforeEach(() => {
@@ -263,7 +276,10 @@ test('shows retry UI when the active tab query fails', async () => {
         getSettings: settingsDeps.getSettings,
         updateSettings: settingsDeps.updateSettings,
         onSettingsChanged: settingsDeps.onSettingsChanged,
-        requestProviderPermission: settingsDeps.requestProviderPermission,
+        hasPageAccess: vi.fn(async () => true),
+        requestPageAccess: vi.fn(async () => true),
+        hasProviderAccess: settingsDeps.hasProviderAccess,
+        requestProviderAccess: settingsDeps.requestProviderAccess,
       }}
     />,
     root,
@@ -292,7 +308,10 @@ test('shows unavailable when no active tab is returned', async () => {
         getSettings: settingsDeps.getSettings,
         updateSettings: settingsDeps.updateSettings,
         onSettingsChanged: settingsDeps.onSettingsChanged,
-        requestProviderPermission: settingsDeps.requestProviderPermission,
+        hasPageAccess: vi.fn(async () => true),
+        requestPageAccess: vi.fn(async () => true),
+        hasProviderAccess: settingsDeps.hasProviderAccess,
+        requestProviderAccess: settingsDeps.requestProviderAccess,
       }}
     />,
     root,
@@ -647,4 +666,57 @@ test('popup save stores api key in lp-secrets without provider.apiKey', async ()
     provider: 'gemini',
     model: 'gemini-2.5-pro',
   });
+});
+
+test('shows page access prompt when site permission is missing', async () => {
+  const uiRequest = vi.fn(async () => ({
+    ok: true,
+    status: status({ available: false }),
+  }));
+  const { root } = mount(uiRequest, vi.fn(), vi.fn(), createSettingsDeps(), {
+    hasPageAccess: vi.fn(async () => false),
+    requestPageAccess: vi.fn(async () => true),
+    hasProviderAccess: vi.fn(async () => true),
+    requestProviderAccess: vi.fn(async () => true),
+  });
+  await waitReady(root);
+  expect(root.textContent).toContain(strings.popup.allowThisSite);
+  expect(root.textContent).toContain(strings.popup.allowAllSites);
+  expect(root.textContent).not.toContain(strings.popup.unavailable);
+});
+
+test('allow site requests origin permission then refreshes tab status', async () => {
+  const uiRequest = vi.fn(async (request: UiRequest) => {
+    if (request.type === 'getTabStatus')
+      return { ok: true, status: status({ available: true }) };
+    return { ok: false, error: 'bad_request' as const };
+  });
+  const requestPageAccess = vi.fn(async () => true);
+  const { root } = mount(uiRequest, vi.fn(), vi.fn(), createSettingsDeps(), {
+    hasPageAccess: vi.fn(async () => false),
+    requestPageAccess,
+    hasProviderAccess: vi.fn(async () => true),
+    requestProviderAccess: vi.fn(async () => true),
+  });
+  await waitReady(root);
+  const allowSite = [...root.querySelectorAll('button')].find(
+    (node) => node.textContent === strings.popup.allowThisSite,
+  );
+  allowSite?.click();
+  await vi.waitFor(() =>
+    expect(root.textContent).toContain(strings.popup.autoSite),
+  );
+  expect(requestPageAccess).toHaveBeenCalledWith('https://docs.example.com');
+  expect(uiRequest).toHaveBeenCalledWith({ type: 'getTabStatus', tabId: 7 });
+});
+
+test('hides page access prompt when permission already granted', async () => {
+  const uiRequest = vi.fn(async () => ({
+    ok: true,
+    status: status(),
+  }));
+  const { root } = mount(uiRequest);
+  await waitReady(root);
+  expect(root.textContent).not.toContain(strings.popup.allowThisSite);
+  expect(root.textContent).toContain(strings.popup.autoSite);
 });
