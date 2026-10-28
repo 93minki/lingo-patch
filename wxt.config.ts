@@ -5,7 +5,7 @@ export default defineConfig({
   srcDir: 'src',
   manifest: ({ mode }) => ({
     name: 'lingo-patch',
-    permissions: ['storage', 'alarms', 'activeTab'],
+    permissions: ['storage', 'alarms', 'activeTab', 'scripting'],
     host_permissions: [
       'https://api.openai.com/*',
       'https://api.anthropic.com/*',

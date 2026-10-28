@@ -5,7 +5,15 @@ import type {
 } from '../../../src/messaging/types';
 const mock = vi.hoisted(() => ({ connect: vi.fn() }));
 vi.mock('wxt/browser', () => ({
-  browser: { runtime: { connect: mock.connect } },
+  browser: {
+    runtime: {
+      connect: mock.connect,
+      onMessage: {
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+      },
+    },
+  },
 }));
 vi.mock('../../../src/core/cache/key', () => ({
   makeCacheKey: async ({ markup }: { markup: string }) => markup,

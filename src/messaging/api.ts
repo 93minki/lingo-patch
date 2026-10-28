@@ -8,8 +8,74 @@ import {
 import type { createPageService } from './service';
 import type { UiResponse, TabStatus } from './extension';
 import { providerOrigin } from '../platform/permissions';
+import { CONTENT_PING } from './content-ping';
 
 type Service = ReturnType<typeof createPageService>;
+
+export function waitForConnection(
+  hasConnection: () => boolean,
+  timeoutMs: number,
+  intervalMs = 50,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const tick = () => {
+      if (hasConnection()) {
+        resolve(true);
+        return;
+      }
+      if (Date.now() - started >= timeoutMs) {
+        resolve(false);
+        return;
+      }
+      setTimeout(tick, intervalMs);
+    };
+    tick();
+  });
+}
+
+export async function ensureContent(
+  tabId: number,
+  service: Pick<Service, 'status'>,
+  deps: {
+    sendMessage: (
+      tabId: number,
+      message: typeof CONTENT_PING,
+    ) => Promise<unknown>;
+    executeScript: (injection: {
+      target: { tabId: number };
+      files: string[];
+    }) => Promise<unknown>;
+    getManifest: () => { content_scripts?: { js?: string[] }[] };
+  } = {
+    sendMessage: (id, message) => browser.tabs.sendMessage(id, message),
+    executeScript: (injection) =>
+      browser.scripting.executeScript(
+        injection as Parameters<typeof browser.scripting.executeScript>[0],
+      ),
+    getManifest: () => browser.runtime.getManifest(),
+  },
+): Promise<boolean> {
+  if (service.status(tabId)) return true;
+  try {
+    await deps.sendMessage(tabId, CONTENT_PING);
+    if (await waitForConnection(() => Boolean(service.status(tabId)), 1000))
+      return true;
+  } catch {
+    /* Content script missing or ping failed. */
+  }
+  const files = deps.getManifest().content_scripts?.[0]?.js;
+  if (!files?.length) return false;
+  try {
+    await deps.executeScript({
+      target: { tabId },
+      files: [...files],
+    });
+  } catch {
+    return false;
+  }
+  return waitForConnection(() => Boolean(service.status(tabId)), 1500);
+}
 export function translatableUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
@@ -97,11 +163,15 @@ export function createUiApi(getService: () => Promise<Service>) {
       const tabId = request.tabId as number;
       const tab = await browser.tabs.get(tabId);
       const url = tab.url ?? '';
-      const available = translatableUrl(url) && Boolean(service.status(tabId));
+      const translatable = translatableUrl(url);
+      let hasConnection = Boolean(service.status(tabId));
+      if (translatable && !hasConnection)
+        hasConnection = await ensureContent(tabId, service);
+      const available = translatable && hasConnection;
       if (available && request.type === 'getTabStatus')
         await service.inspect(tabId);
       const settings = await getSettings();
-      const parsed = translatableUrl(url) ? new URL(url) : undefined;
+      const parsed = translatable ? new URL(url) : undefined;
       const status: TabStatus = service.status(tabId) ?? {
         available: false,
         configured: Boolean(settings.provider),
@@ -115,7 +185,7 @@ export function createUiApi(getService: () => Promise<Service>) {
         translated: 0,
         pending: 0,
       };
-      status.available = translatableUrl(url) && Boolean(service.status(tabId));
+      status.available = translatable && Boolean(service.status(tabId));
       switch (request.type) {
         case 'getTabStatus':
           return { ok: true, status };

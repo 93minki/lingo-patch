@@ -8,6 +8,11 @@ const mock = vi.hoisted(() => ({
   permission: vi.fn(),
   open: vi.fn(),
   models: vi.fn(),
+  sendMessage: vi.fn(),
+  executeScript: vi.fn(),
+  getManifest: vi.fn(() => ({
+    content_scripts: [{ js: ['content-scripts/content.js'] }],
+  })),
 }));
 vi.mock('wxt/browser', () => ({
   browser: {
@@ -15,9 +20,11 @@ vi.mock('wxt/browser', () => ({
       id: 'extension',
       getURL: (path: string) => `chrome-extension://extension/${path}`,
       openOptionsPage: mock.open,
+      getManifest: mock.getManifest,
     },
     permissions: { contains: mock.permission },
-    tabs: { get: mock.tab },
+    tabs: { get: mock.tab, sendMessage: mock.sendMessage },
+    scripting: { executeScript: mock.executeScript },
   },
 }));
 vi.mock('../../../src/storage/settings', async (original) => ({
@@ -72,14 +79,29 @@ const api = createUiApi(
 );
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
   mock.tab.mockResolvedValue({ id: 1, url: 'https://site.test/a' });
   mock.permission.mockResolvedValue(true);
   mock.models.mockResolvedValue(['model-a']);
+  mock.sendMessage.mockResolvedValue({ ok: true });
+  mock.executeScript.mockResolvedValue([]);
   mock.get.mockResolvedValue({
     provider: { provider: 'gemini', apiKey: 'private-key', model: 'model' },
     autoSites: ['site.test'],
     displayMode: 'bilingual',
   });
+});
+test('getTabStatus runs ensureContent before reporting unavailable', async () => {
+  service.status
+    .mockReturnValueOnce(undefined as unknown as typeof state)
+    .mockReturnValueOnce(undefined as unknown as typeof state)
+    .mockReturnValue({ ...state });
+  const response = await api({ type: 'getTabStatus', tabId: 1 }, popup);
+  expect(mock.sendMessage).toHaveBeenCalledWith(1, {
+    scope: 'lp-content',
+    type: 'ping',
+  });
+  expect(response).toEqual({ ok: true, status: state });
 });
 test('returns only safe tab state and routes toggle and preferences', async () => {
   const response = await api({ type: 'getTabStatus', tabId: 1 }, popup);

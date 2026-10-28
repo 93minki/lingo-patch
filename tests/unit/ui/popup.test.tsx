@@ -235,6 +235,24 @@ test('renders four page stats from tab status', async () => {
   expect(root.textContent).toContain('2');
 });
 
+test('shows checking copy while tab status is loading', async () => {
+  let resolveStatus: (value: UiResponse) => void = () => {};
+  const uiRequest = vi.fn(
+    () =>
+      new Promise<UiResponse>((resolve) => {
+        resolveStatus = resolve;
+      }),
+  );
+  const { root } = mount(uiRequest);
+  await vi.waitFor(() =>
+    expect(root.textContent).toContain(strings.popup.checking),
+  );
+  resolveStatus({ ok: true, status: status() });
+  await vi.waitFor(() =>
+    expect(root.textContent).toContain(strings.popup.autoSite),
+  );
+});
+
 test('always shows a settings link that opens the options page', async () => {
   const openOptionsPage = vi.fn();
   const uiRequest = vi.fn(async () => ({

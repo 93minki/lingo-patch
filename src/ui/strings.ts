@@ -13,6 +13,7 @@ export const strings = {
   popup: {
     title: 'lingo-patch',
     loading: '불러오는 중…',
+    checking: '확인 중…',
     unavailable: '이 페이지는 번역할 수 없습니다',
     configure: '번역 설정하기',
     autoSite: '이 사이트 항상 번역',

@@ -8,8 +8,16 @@ import { createProgress } from './progress';
 import type { BackgroundMessage, PagePayload } from '../messaging/types';
 import { SegmentRenderer, type RenderRecord } from './renderer';
 import { ensureStyle } from './style';
+import { isContentPing } from '../messaging/content-ping';
+
+declare global {
+  interface Window {
+    __lpPipelineDispose?: () => void;
+  }
+}
 
 export function startPagePipeline() {
+  window.__lpPipelineDispose?.();
   const renderer = new SegmentRenderer(document);
   let records: RenderRecord[] = [];
   const memory = new Map<string, string>();
@@ -37,6 +45,7 @@ export function startPagePipeline() {
   let intersection: IntersectionObserver | undefined;
   let scanning = false,
     scanAgain = false;
+  let started = false;
   const post = (message: PagePayload) => {
     try {
       port?.postMessage({ ...message, generation });
@@ -362,19 +371,51 @@ export function startPagePipeline() {
     }
     report();
   };
-  const connect = () => {
+  const reconnectPort = () => {
     if (disposed) return;
+    if (reconnectTimer !== undefined) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = undefined;
+    }
+    port?.disconnect();
+    port = undefined;
+    connected = false;
+    connect();
+  };
+  const connect = () => {
+    if (disposed || !started) return;
     try {
       port = browser.runtime.connect({ name: 'lp-page' });
       port.onMessage.addListener(receive);
       port.onDisconnect.addListener(() => {
         connected = false;
         requested.clear();
-        if (!disposed) reconnectTimer = setTimeout(connect, 100);
+        if (!disposed && started)
+          reconnectTimer = setTimeout(connect, 100);
       });
     } catch {
-      if (!disposed) reconnectTimer = setTimeout(connect, 1000);
+      if (!disposed && started)
+        reconnectTimer = setTimeout(connect, 1000);
     }
+  };
+  const begin = () => {
+    if (disposed || started) return;
+    started = true;
+    connect();
+  };
+  const onPageshow = (event: PageTransitionEvent) => {
+    if (event.persisted && started && !connected && !disposed) reconnectPort();
+  };
+  const onPrerenderingChange = () => begin();
+  const onPing = (
+    message: unknown,
+    _sender: Browser.runtime.MessageSender,
+    sendResponse: (response: { ok: boolean }) => void,
+  ) => {
+    if (!isContentPing(message)) return;
+    reconnectPort();
+    sendResponse({ ok: true });
+    return true;
   };
   const navigate = () => {
     if (location.href !== href) {
@@ -390,16 +431,30 @@ export function startPagePipeline() {
   const heartbeat = setInterval(() => {
     if (enabled && requested.size) post({ type: 'lookup', keys: [] });
   }, 20000);
-  connect();
-  return () => {
+  window.addEventListener('pageshow', onPageshow);
+  browser.runtime.onMessage.addListener(onPing);
+  if ('prerendering' in document && document.prerendering) {
+    document.addEventListener('prerenderingchange', onPrerenderingChange, {
+      once: true,
+    });
+  } else {
+    begin();
+  }
+  const dispose = () => {
     disposed = true;
     clear();
     progress.destroy();
     port?.disconnect();
-    if (reconnectTimer) clearTimeout(reconnectTimer);
+    if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);
     if (routeTimer) clearInterval(routeTimer);
     clearInterval(heartbeat);
     navigation?.removeEventListener('navigatesuccess', navigate);
     window.removeEventListener('popstate', navigate);
+    window.removeEventListener('pageshow', onPageshow);
+    document.removeEventListener('prerenderingchange', onPrerenderingChange);
+    browser.runtime.onMessage.removeListener(onPing);
+    if (window.__lpPipelineDispose === dispose) delete window.__lpPipelineDispose;
   };
+  window.__lpPipelineDispose = dispose;
+  return dispose;
 }

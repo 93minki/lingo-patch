@@ -27,6 +27,9 @@ html[data-lp-mode="translation"] [data-lp-src-hidden] > lp-t {
   font-size: var(--lp-fs) !important;
   line-height: var(--lp-lh) !important;
   margin-top: 0 !important;
+  /* Share the hidden source's first line so list markers stay beside the text. */
+  display: inline !important;
+  margin-left: 0 !important;
 }
 html[data-lp-mode="translation"] li[data-lp-src-hidden]::marker {
   font-size: 1rem;
