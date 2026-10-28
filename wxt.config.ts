@@ -27,7 +27,11 @@ export default defineConfig({
       },
     },
     browser_specific_settings: {
-      gecko: { id: 'lingo-patch@local' },
+      gecko: {
+        id: 'lingo-patch@local',
+        // Page text is sent to the AI provider the user configures.
+        data_collection_permissions: { required: ['websiteContent'] },
+      },
     },
   }),
   hooks: {
