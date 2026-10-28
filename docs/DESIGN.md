@@ -23,6 +23,8 @@ Immersive Translate처럼 AI로 웹 페이지를 이중 언어로 번역하는 �
 - 자체 백엔드 서버, 계정, 기기 간 자동 동기화
 - PDF, 동영상 자막, 이미지 OCR 번역
 - 스토어 공개 배포 (개인 사용 우선. 구조는 나중에 배포할 수 있게 유지)
+- **기계번역 엔진** (브라우저 내장 번역 API, 구글 번역 웹 엔드포인트 등). 이 확장은 AI 번역만 한다
+- 무료 번역을 위한 자체 프록시 서버. 무료로 쓰려는 사용자에게는 무료 등급 키(Gemini, Groq, OpenRouter)를 안내한다 (§8.5)
 
 ---
 
@@ -31,6 +33,8 @@ Immersive Translate처럼 AI로 웹 페이지를 이중 언어로 번역하는 �
 | 항목 | 결정 |
 |---|---|
 | 번역 엔진 | BYOK. OpenAI, Anthropic, Gemini, OpenAI 호환(OpenRouter, Ollama 등) |
+| 무료 이용 | 서버 없음. 첫 실행 시 무료 등급 키(Gemini 기본, Groq·OpenRouter 대안) 발급을 안내. 더 좋은 품질은 유료 키 |
+| 제공자 프리셋 | OpenAI 호환 방식의 DeepSeek, Groq, OpenRouter는 주소·모델을 미리 채운 프리셋으로 제공 (§7.6) |
 | 모델 선택 | 키를 넣은 제공자의 현행 상위 모델 3개 중에서 사용자가 고름 (§7.5). 최상위 고가 모델(예: Astra)은 목록에서 제외 |
 | 번역 문체 | 존댓말 평서문(~합니다/~하세요) 고정. 요약·생략·의역 축약 금지 |
 | 캐시 | IndexedDB 로컬 영구 저장. 문단 단위, 마지막 접근 기준 TTL 90일 + 용량 상한 20MB LRU |
@@ -210,6 +214,16 @@ interface TranslationProvider {
 | Gemini | 현행 상위 3종 | P3에서 확인해 확정 |
 | OpenAI 호환 | 모델 ID 직접 입력 | Ollama, OpenRouter 등 |
 
+### 7.6 제공자 프리셋과 요청 속도 제한
+- 프리셋은 `openai-compatible` 제공자에 주소·모델 후보·분당 요청 한도(RPM)를 미리 채운 것이다. 사용자는 키만 넣는다
+  | 프리셋 | base URL | 무료 | 비고 |
+  |---|---|---|---|
+  | DeepSeek | `https://api.deepseek.com` | 아니오 (매우 저렴) | |
+  | Groq | `https://api.groq.com/openai/v1` | 예 (모델별 분당·일일 한도) | |
+  | OpenRouter | `https://openrouter.ai/api/v1` | `:free` 모델만 (분당 20, 일 50회) | 모델 목록에서 `:free`로 끝나는 것만 무료 표시 |
+- 큐는 제공자(프리셋)별 **분당 요청 수 상한**을 지킨다. 무료 등급은 한도가 낮아 동시 요청만으로는 429가 잦다
+- 정확한 base URL·모델 ID·한도는 구현 시 공식 문서로 확인한다
+
 ---
 
 ## 8. 부가 기능
@@ -229,6 +243,12 @@ interface TranslationProvider {
 - `Alt+A`: 이 페이지 번역 켜기/끄기
 - `Alt+S`: 표시 모드 전환 (이중 언어 → 번역문만 → 원문만)
 - 사용자가 브라우저 단축키 설정에서 변경 가능
+
+### 8.5 첫 실행 안내 (무료로 시작하기)
+- 키가 없으면 옵션 화면이 열리고 두 갈래를 보여준다
+  - **무료로 시작**: Gemini 무료 키 발급 단계별 안내(기본 추천), 대안으로 Groq·OpenRouter 무료
+  - **더 좋은 품질**: OpenAI, Anthropic, DeepSeek 유료 키
+- 무료 등급은 입력이 제공자의 서비스 개선에 쓰일 수 있다는 점을 한 줄로 알린다
 
 ### 8.4 팝업
 - 이 사이트 항상 번역 토글, 지금 번역, 표시 모드
