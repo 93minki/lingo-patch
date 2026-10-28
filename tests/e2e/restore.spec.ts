@@ -331,8 +331,16 @@ test('persistent paragraph cache, original DOM, lazy requests and keyboard modes
     await settled(page);
     expect((await stats()).requests).toBe(previous.requests);
     counts.push({ scenario: 'DOM translation removal', additionalCalls: 0 });
+    const beforeHash = await page.locator('lp-t').first().elementHandle();
+    await page.evaluate(() => history.pushState({}, '', '#section'));
+    await page.waitForTimeout(700);
+    expect(await beforeHash!.evaluate((node) => node.isConnected)).toBe(true);
+    counts.push({
+      scenario: 'hash-only change keeps nodes',
+      additionalCalls: 0,
+    });
     const beforeSPA = await page.locator('lp-t').first().elementHandle();
-    await page.evaluate(() => history.pushState({}, '', '#spa'));
+    await page.evaluate(() => history.pushState({}, '', '?spa=1'));
     await expect
       .poll(() => beforeSPA!.evaluate((node) => node.isConnected))
       .toBe(false);
