@@ -44,6 +44,10 @@ vi.mock('../../../src/storage/glossary', () => ({
   getGlossary: async () => ({ global: [], sites: {}, useDefaults: false }),
   onGlossaryChanged: vi.fn(),
 }));
+vi.mock('../../../src/storage/secrets', () => ({
+  getApiKey: vi.fn(async () => undefined),
+  onSecretsChanged: vi.fn(),
+}));
 vi.mock('../../../src/storage/settings', () => ({
   getSettings: mocks.getSettings,
   onSettingsChanged: mocks.settingsChanged,
@@ -53,6 +57,7 @@ vi.mock('../../../src/messaging/service', () => ({
   createPageService: () => ({
     toggle: mocks.toggle,
     update: mocks.serviceUpdate,
+    configured: () => false,
   }),
 }));
 import { browser } from 'wxt/browser';
@@ -156,9 +161,11 @@ test('toggle command opens setup without a key and targets active tab; settings 
   expect(browser.runtime.openOptionsPage).toHaveBeenCalledOnce();
   expect(mocks.toggle).toHaveBeenCalledWith(7);
   const next = { displayMode: 'original' };
+  mocks.getSettings.mockResolvedValue(next);
   mocks.settingsChanged.mock.calls[0]![0](next);
-  await Promise.resolve();
-  expect(mocks.serviceUpdate).toHaveBeenCalledWith(next);
+  await vi.waitFor(() =>
+    expect(mocks.serviceUpdate).toHaveBeenCalledWith(next, null),
+  );
 });
 test('opens first-run setup on install only, without reopening on extension updates', async () => {
   const installed = mocks.installed.mock.calls[0]![0];

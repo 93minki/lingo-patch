@@ -23,6 +23,16 @@ import {
 import type { Settings, SettingsPatch } from '../../../src/storage/settings';
 import { strings } from '../../../src/ui/strings';
 
+const storageMocks = vi.hoisted(() => ({
+  localData: {} as Record<string, unknown>,
+  listeners: [] as Array<
+    (
+      changes: Record<string, { newValue?: unknown; oldValue?: unknown }>,
+      area: string,
+    ) => void
+  >,
+}));
+
 vi.mock('wxt/browser', () => ({
   browser: {
     commands: { getAll: vi.fn(async () => []) },
@@ -30,8 +40,83 @@ vi.mock('wxt/browser', () => ({
       id: 'test',
       getURL: (p: string) => `chrome-extension://test${p}`,
     },
+    storage: {
+      local: {
+        get: vi.fn(
+          async (keys?: string | string[] | Record<string, unknown> | null) => {
+            if (keys === null || keys === undefined) {
+              return { ...storageMocks.localData };
+            }
+            if (typeof keys === 'string') {
+              return { [keys]: storageMocks.localData[keys] };
+            }
+            if (Array.isArray(keys)) {
+              return Object.fromEntries(
+                keys.map((key) => [key, storageMocks.localData[key]]),
+              );
+            }
+            return { ...storageMocks.localData };
+          },
+        ),
+        set: vi.fn(async (items: Record<string, unknown>) => {
+          const changes: Record<
+            string,
+            { newValue?: unknown; oldValue?: unknown }
+          > = {};
+          for (const [key, value] of Object.entries(items)) {
+            changes[key] = {
+              oldValue: storageMocks.localData[key],
+              newValue: value,
+            };
+            storageMocks.localData[key] = value;
+          }
+          for (const listener of storageMocks.listeners) {
+            listener(changes, 'local');
+          }
+        }),
+        remove: vi.fn(async (keys: string | string[]) => {
+          const list = Array.isArray(keys) ? keys : [keys];
+          const changes: Record<
+            string,
+            { newValue?: unknown; oldValue?: unknown }
+          > = {};
+          for (const key of list) {
+            changes[key] = {
+              oldValue: storageMocks.localData[key],
+              newValue: undefined,
+            };
+            delete storageMocks.localData[key];
+          }
+          for (const listener of storageMocks.listeners) {
+            listener(changes, 'local');
+          }
+        }),
+      },
+      onChanged: {
+        addListener: (listener: (typeof storageMocks.listeners)[number]) => {
+          storageMocks.listeners.push(listener);
+        },
+        removeListener: (listener: (typeof storageMocks.listeners)[number]) => {
+          storageMocks.listeners = storageMocks.listeners.filter(
+            (item) => item !== listener,
+          );
+        },
+      },
+    },
   },
 }));
+
+function readSecrets(): Record<string, string> {
+  const stored = storageMocks.localData['lp-secrets'];
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+    return {};
+  }
+  return stored as Record<string, string>;
+}
+
+function writeSecrets(secrets: Record<string, string>) {
+  storageMocks.localData['lp-secrets'] = secrets;
+}
 
 const DEFAULT_SETTINGS: Settings = {
   provider: null,
@@ -79,6 +164,8 @@ function deps(overrides: Partial<OptionsDeps> = {}): OptionsDeps {
 
 beforeEach(() => {
   document.body.innerHTML = '';
+  storageMocks.localData = {};
+  storageMocks.listeners.length = 0;
   vi.clearAllMocks();
 });
 afterEach(() => {
@@ -161,7 +248,6 @@ test('shows onboarding when provider is missing', () => {
   expect(
     showsOnboarding({
       provider: 'openai',
-      apiKey: 'k',
       model: 'm',
     }),
   ).toBe(false);
@@ -210,10 +296,14 @@ test('buildProviderConfig trims custom baseUrl', () => {
 });
 
 test('persistEngineSettings rejects OpenRouter free filter with no free models', async () => {
+  const setApiKey = vi.fn(async () => {});
+  const getApiKey = vi.fn(async () => undefined);
   const result = await persistEngineSettings(
     {
       updateSettings,
       requestProviderPermission: vi.fn(async () => true),
+      setApiKey,
+      getApiKey,
     },
     {
       engine: 'preset',
@@ -230,10 +320,14 @@ test('persistEngineSettings rejects OpenRouter free filter with no free models',
 });
 
 test('persistEngineSettings allows custom model not returned by listModels', async () => {
+  const setApiKey = vi.fn(async () => {});
+  const getApiKey = vi.fn(async () => undefined);
   await persistEngineSettings(
     {
       updateSettings,
       requestProviderPermission: vi.fn(async () => true),
+      setApiKey,
+      getApiKey,
     },
     {
       engine: 'custom',
@@ -247,16 +341,48 @@ test('persistEngineSettings allows custom model not returned by listModels', asy
   );
   expect(updateSettings).toHaveBeenCalledWith(
     expect.objectContaining({
-      provider: expect.objectContaining({ model: 'undeclared-model' }),
+      provider: expect.objectContaining({
+        provider: 'openai-compatible',
+        model: 'undeclared-model',
+      }),
     }),
   );
+  expect(setApiKey).toHaveBeenCalledWith('openai-compatible', 'k');
+});
+
+test('persistEngineSettings stores empty custom api key separately from missing key', async () => {
+  const setApiKey = vi.fn(async () => {});
+  const getApiKey = vi.fn(async () => undefined);
+  await persistEngineSettings(
+    {
+      updateSettings,
+      requestProviderPermission: vi.fn(async () => true),
+      setApiKey,
+      getApiKey,
+    },
+    {
+      engine: 'custom',
+      presetId: 'groq',
+      apiKey: '',
+      model: 'local-model',
+      baseUrl: 'http://localhost:11434/v1',
+      models: [],
+      freeOnly: false,
+    },
+  );
+  expect(setApiKey).toHaveBeenCalledWith('openai-compatible', '');
+  expect(updateSettings).toHaveBeenCalled();
 });
 
 test('persistEngineSettings rejects custom saves without permission', async () => {
+  const setApiKey = vi.fn(async () => {});
+  const getApiKey = vi.fn(async () => undefined);
   const result = await persistEngineSettings(
     {
       updateSettings,
       requestProviderPermission: vi.fn(async () => false),
+      setApiKey,
+      getApiKey,
     },
     {
       engine: 'custom',
@@ -273,10 +399,14 @@ test('persistEngineSettings rejects custom saves without permission', async () =
 });
 
 test('persistEngineSettings rejects empty api key for native providers', async () => {
+  const setApiKey = vi.fn(async () => {});
+  const getApiKey = vi.fn(async () => undefined);
   const result = await persistEngineSettings(
     {
       updateSettings,
       requestProviderPermission: vi.fn(async () => true),
+      setApiKey,
+      getApiKey,
     },
     {
       engine: 'openai',
@@ -290,13 +420,47 @@ test('persistEngineSettings rejects empty api key for native providers', async (
   );
   expect(result).toBe('invalid-key');
   expect(updateSettings).not.toHaveBeenCalled();
+  expect(setApiKey).not.toHaveBeenCalled();
 });
 
-test('persistEngineSettings clears preset for native providers', async () => {
+test('persistEngineSettings uses stored secret when draft key is blank', async () => {
+  const setApiKey = vi.fn(async () => {});
+  const getApiKey = vi.fn(async (id: string) =>
+    id === 'openai' ? 'stored-openai' : undefined,
+  );
   await persistEngineSettings(
     {
       updateSettings,
       requestProviderPermission: vi.fn(async () => true),
+      setApiKey,
+      getApiKey,
+    },
+    {
+      engine: 'openai',
+      presetId: 'groq',
+      apiKey: '   ',
+      model: 'gpt-6-luna',
+      baseUrl: '',
+      models: ['gpt-6-luna'],
+      freeOnly: false,
+    },
+  );
+  expect(setApiKey).toHaveBeenCalledWith('openai', 'stored-openai');
+  expect(updateSettings).toHaveBeenCalledWith({
+    provider: { provider: 'openai', model: 'gpt-6-luna' },
+    preset: undefined,
+  });
+});
+
+test('persistEngineSettings clears preset for native providers', async () => {
+  const setApiKey = vi.fn(async () => {});
+  const getApiKey = vi.fn(async () => undefined);
+  await persistEngineSettings(
+    {
+      updateSettings,
+      requestProviderPermission: vi.fn(async () => true),
+      setApiKey,
+      getApiKey,
     },
     {
       engine: 'openai',
@@ -311,11 +475,11 @@ test('persistEngineSettings clears preset for native providers', async () => {
   expect(updateSettings).toHaveBeenCalledWith({
     provider: {
       provider: 'openai',
-      apiKey: 'k',
       model: 'gpt-6-luna',
     },
     preset: undefined,
   });
+  expect(setApiKey).toHaveBeenCalledWith('openai', 'k');
 });
 
 test('validateProviderKey requests preset permission before validateProvider', async () => {
@@ -363,7 +527,7 @@ test('validateProviderKey skips validate when permission denied', async () => {
 
 test('providerFingerprint ignores language and cache fields', () => {
   const base = {
-    provider: { provider: 'openai' as const, apiKey: 'a', model: 'm' },
+    provider: { provider: 'openai' as const, model: 'm' },
     targetLang: 'ko',
     autoSites: [],
     displayMode: 'bilingual' as const,
@@ -404,8 +568,9 @@ test('shows load error when bootstrap requests fail', async () => {
 });
 
 test('onSettingsChanged keeps unsaved api key when provider fingerprint matches', async () => {
+  writeSecrets({ openai: 'saved' });
   const stored: Settings = {
-    provider: { provider: 'openai', apiKey: 'saved', model: 'm' },
+    provider: { provider: 'openai', model: 'm' },
     targetLang: 'ko',
     autoSites: [],
     displayMode: 'bilingual',
@@ -438,8 +603,9 @@ test('onSettingsChanged keeps unsaved api key when provider fingerprint matches'
 });
 
 test('toggles API key visibility', async () => {
+  writeSecrets({ openai: 'hidden-key' });
   getSettings.mockResolvedValue({
-    provider: { provider: 'openai', apiKey: 'secret', model: 'm' },
+    provider: { provider: 'openai', model: 'm' },
     targetLang: 'ko',
     autoSites: [],
     displayMode: 'bilingual',
@@ -471,7 +637,6 @@ test('keeps saved OpenRouter model before listModels', async () => {
   getSettings.mockResolvedValue({
     provider: {
       provider: 'openai-compatible',
-      apiKey: 'saved-key',
       model: savedModel,
       baseUrl: 'https://openrouter.ai/api/v1',
     },
@@ -495,7 +660,6 @@ test('custom engine always uses text model input', async () => {
   getSettings.mockResolvedValue({
     provider: {
       provider: 'openai-compatible',
-      apiKey: 'k',
       model: 'custom-model',
       baseUrl: 'https://api.example.com/v1',
     },
@@ -560,5 +724,132 @@ test('renders Korean command labels', async () => {
   render(<OptionsApp deps={deps()} />, root);
   await vi.waitFor(() =>
     expect(root.textContent).toContain(strings.options.commandToggleTranslate),
+  );
+});
+
+test('delete stored key asks for confirmation and keeps provider settings', async () => {
+  writeSecrets({ openai: 'secret-openai', gemini: 'secret-gemini' });
+  const stored: Settings = {
+    provider: { provider: 'openai', model: 'gpt-test' },
+    targetLang: 'ko',
+    autoSites: [],
+    displayMode: 'bilingual',
+    skipFixedBars: true,
+    cache: { ttlDays: 90, maxMB: 20 },
+  };
+  getSettings.mockResolvedValue(stored);
+  const confirm = vi.fn(() => true);
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  render(<OptionsApp deps={deps({ confirm })} />, root);
+  await vi.waitFor(() =>
+    expect((root.querySelector('#lp-api-key') as HTMLInputElement).value).toBe(
+      'secret-openai',
+    ),
+  );
+  const deleteButton = [...root.querySelectorAll('button')].find(
+    (node) => node.textContent === strings.options.deleteKey,
+  );
+  deleteButton?.click();
+  expect(confirm).toHaveBeenCalledWith(
+    strings.options.deleteKeyConfirm(strings.options.engineOpenai),
+  );
+  await vi.waitFor(() =>
+    expect((root.querySelector('#lp-api-key') as HTMLInputElement).value).toBe(
+      '',
+    ),
+  );
+  expect(readSecrets()).toEqual({ gemini: 'secret-gemini' });
+  expect(updateSettings).not.toHaveBeenCalledWith(
+    expect.objectContaining({ provider: null }),
+  );
+});
+
+test('canceling delete key confirmation leaves lp-secrets unchanged', async () => {
+  writeSecrets({ openai: 'keep-me' });
+  getSettings.mockResolvedValue({
+    provider: { provider: 'openai', model: 'm' },
+    targetLang: 'ko',
+    autoSites: [],
+    displayMode: 'bilingual',
+    skipFixedBars: true,
+    cache: { ttlDays: 90, maxMB: 20 },
+  } satisfies Settings);
+  const confirm = vi.fn(() => false);
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  render(<OptionsApp deps={deps({ confirm })} />, root);
+  await vi.waitFor(() =>
+    expect((root.querySelector('#lp-api-key') as HTMLInputElement).value).toBe(
+      'keep-me',
+    ),
+  );
+  [...root.querySelectorAll('button')]
+    .find((node) => node.textContent === strings.options.deleteKey)
+    ?.click();
+  expect(confirm).toHaveBeenCalled();
+  expect(readSecrets()).toEqual({ openai: 'keep-me' });
+});
+
+test('switching engines restores each provider secret from lp-secrets', async () => {
+  writeSecrets({ openai: 'openai-key', gemini: 'gemini-key' });
+  getSettings.mockResolvedValue({
+    provider: { provider: 'openai', model: 'm' },
+    targetLang: 'ko',
+    autoSites: [],
+    displayMode: 'bilingual',
+    skipFixedBars: true,
+    cache: { ttlDays: 90, maxMB: 20 },
+  } satisfies Settings);
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  render(<OptionsApp deps={deps()} />, root);
+  await vi.waitFor(() =>
+    expect((root.querySelector('#lp-api-key') as HTMLInputElement).value).toBe(
+      'openai-key',
+    ),
+  );
+  const engineSelect = root.querySelector('#lp-engine') as HTMLSelectElement;
+  engineSelect.value = 'gemini';
+  engineSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  await vi.waitFor(() =>
+    expect((root.querySelector('#lp-api-key') as HTMLInputElement).value).toBe(
+      'gemini-key',
+    ),
+  );
+  engineSelect.value = 'openai';
+  engineSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  await vi.waitFor(() =>
+    expect((root.querySelector('#lp-api-key') as HTMLInputElement).value).toBe(
+      'openai-key',
+    ),
+  );
+});
+
+test('clear all keys removes lp-secrets but keeps provider metadata', async () => {
+  writeSecrets({ openai: 'one', gemini: 'two', groq: 'three' });
+  const stored: Settings = {
+    provider: { provider: 'openai', model: 'm' },
+    targetLang: 'ko',
+    autoSites: [],
+    displayMode: 'bilingual',
+    skipFixedBars: true,
+    cache: { ttlDays: 90, maxMB: 20 },
+  };
+  getSettings.mockResolvedValue(stored);
+  const confirm = vi.fn(() => true);
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  render(<OptionsApp deps={deps({ confirm })} />, root);
+  await vi.waitFor(() =>
+    expect(root.textContent).toContain(strings.options.clearAllKeys),
+  );
+  [...root.querySelectorAll('button')]
+    .find((node) => node.textContent === strings.options.clearAllKeys)
+    ?.click();
+  expect(confirm).toHaveBeenCalledWith(strings.options.clearAllKeysConfirm);
+  await vi.waitFor(() => expect(readSecrets()).toEqual({}));
+  expect(updateSettings).not.toHaveBeenCalledWith(
+    expect.objectContaining({ provider: null }),
   );
 });

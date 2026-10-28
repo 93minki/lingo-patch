@@ -123,8 +123,18 @@ export function createUiApi(getService: () => Promise<Service>) {
       if (request.type === 'validateProvider') {
         if (!optionsPage && !popupPage)
           return { ok: false, error: 'permission' };
-        const cfg = normalizeSettings({ provider: request.cfg }).provider;
-        if (!cfg) return { ok: false, error: 'bad_request' };
+        const provider = normalizeSettings({ provider: request.cfg }).provider;
+        const input = request.cfg;
+        if (
+          !provider ||
+          !input ||
+          typeof input !== 'object' ||
+          !('apiKey' in input) ||
+          typeof input.apiKey !== 'string' ||
+          (!input.apiKey.trim() && provider.provider !== 'openai-compatible')
+        )
+          return { ok: false, error: 'bad_request' };
+        const cfg = { ...provider, apiKey: input.apiKey };
         if (
           popupPage &&
           cfg.provider === 'openai-compatible' &&
@@ -215,7 +225,7 @@ export function createUiApi(getService: () => Promise<Service>) {
       const parsed = translatable ? new URL(url) : undefined;
       const status: TabStatus = service.status(tabId) ?? {
         available: false,
-        configured: Boolean(settings.provider),
+        configured: service.configured(),
         enabled: false,
         hostname: parsed?.hostname ?? '',
         origin: parsed?.origin ?? '',
@@ -241,14 +251,14 @@ export function createUiApi(getService: () => Promise<Service>) {
         }
         case 'toggleTab':
           if (!available) return { ok: false, error: 'unavailable' };
-          if (!settings.provider) {
+          if (!service.configured()) {
             await browser.runtime.openOptionsPage();
             return { ok: true };
           }
           service.toggle(tabId);
           return { ok: true };
         case 'retranslatePage':
-          if (!available || !settings.provider)
+          if (!available || !service.configured())
             return { ok: false, error: 'unavailable' };
           await service.retranslate(tabId);
           return { ok: true };

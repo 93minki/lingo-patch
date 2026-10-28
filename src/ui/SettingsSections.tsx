@@ -8,19 +8,29 @@ import type { requestProviderPermission } from '../platform/permissions';
 import {
   getSettings,
   updateSettings,
+  type ProviderSettings,
   type Settings,
   type SettingsPatch,
 } from '../storage/settings';
+import {
+  clearApiKey as clearApiKeyStorage,
+  getApiKey as getApiKeyStorage,
+  onSecretsChanged,
+  setApiKey as setApiKeyStorage,
+} from '../storage/secrets';
 import { strings } from './strings';
 
 export const LIST_MODELS_PROBE = '__list_models__';
 
+const LIMIT_LINKS = {
+  openai:
+    'https://help.openai.com/en/articles/9186755-managing-projects-in-the-api-platform',
+  anthropic: 'https://platform.claude.com/docs/en/manage-claude/workspaces',
+  gemini: 'https://ai.google.dev/gemini-api/docs/api-key?hl=en',
+} as const;
+
 export type EngineKind =
-  | 'openai'
-  | 'anthropic'
-  | 'gemini'
-  | 'preset'
-  | 'custom';
+  'openai' | 'anthropic' | 'gemini' | 'preset' | 'custom';
 
 export function isHttpProviderBaseUrl(value: string): boolean {
   try {
@@ -107,6 +117,33 @@ export function permissionBaseUrl(
   return undefined;
 }
 
+export function secretKeyId(engine: EngineKind, presetId: PresetId): string {
+  if (engine === 'preset') return presetId;
+  if (engine === 'custom') return 'openai-compatible';
+  return engine;
+}
+
+export function activeSecretId(settings: Settings): string | undefined {
+  if (!settings.provider) return undefined;
+  if (settings.preset) return settings.preset;
+  return settings.provider.provider;
+}
+
+export function engineDisplayName(
+  engine: EngineKind,
+  presetId: PresetId,
+): string {
+  if (engine === 'preset') {
+    if (presetId === 'deepseek') return strings.options.engineDeepseek;
+    if (presetId === 'groq') return strings.options.engineGroq;
+    return strings.options.engineOpenrouter;
+  }
+  if (engine === 'custom') return strings.options.engineCustom;
+  if (engine === 'openai') return strings.options.engineOpenai;
+  if (engine === 'anthropic') return strings.options.engineAnthropic;
+  return strings.options.engineGemini;
+}
+
 export function providerFingerprint(settings: Settings): string {
   const provider = settings.provider;
   if (!provider) return 'none';
@@ -115,7 +152,6 @@ export function providerFingerprint(settings: Settings): string {
     provider.provider,
     provider.baseUrl ?? '',
     provider.model,
-    provider.apiKey,
   ].join('|');
 }
 
@@ -136,18 +172,73 @@ export function inferEngine(settings: Settings): {
 }
 
 export type PersistResult =
-  | 'saved'
-  | 'permission'
-  | 'invalid-model'
-  | 'invalid-url'
-  | 'invalid-key';
+  'saved' | 'permission' | 'invalid-model' | 'invalid-url' | 'invalid-key';
 
 export type SettingsSectionsDeps = {
   uiRequest: (request: UiRequest) => Promise<UiResponse>;
   updateSettings: typeof updateSettings;
   getSettings: typeof getSettings;
   requestProviderPermission: typeof requestProviderPermission;
+  getApiKey?: typeof getApiKeyStorage;
+  setApiKey?: typeof setApiKeyStorage;
+  clearApiKey?: typeof clearApiKeyStorage;
+  confirm?: (message: string) => boolean;
 };
+
+function resolveSecretsDeps(
+  deps: Pick<SettingsSectionsDeps, 'getApiKey' | 'setApiKey' | 'clearApiKey'>,
+) {
+  return {
+    getApiKey: deps.getApiKey ?? getApiKeyStorage,
+    setApiKey: deps.setApiKey ?? setApiKeyStorage,
+    clearApiKey: deps.clearApiKey ?? clearApiKeyStorage,
+  };
+}
+
+async function keyForValidation(
+  getApiKey: typeof getApiKeyStorage,
+  id: string,
+  draft: string,
+  engine: EngineKind,
+): Promise<string | undefined> {
+  const trimmed = draft.trim();
+  if (trimmed) return trimmed;
+  if (engine === 'custom') {
+    const stored = await getApiKey(id);
+    if (stored !== undefined) return stored;
+    return draft;
+  }
+  const stored = await getApiKey(id);
+  if (stored === undefined || stored === '') return undefined;
+  return stored;
+}
+
+export function buildProviderSettings(input: {
+  engine: EngineKind;
+  presetId?: PresetId;
+  model: string;
+  baseUrl: string;
+}): ProviderSettings {
+  if (input.engine === 'preset') {
+    const preset = PRESETS.find((item) => item.id === input.presetId)!;
+    return {
+      provider: 'openai-compatible',
+      model: input.model || LIST_MODELS_PROBE,
+      baseUrl: preset.baseUrl,
+    };
+  }
+  if (input.engine === 'custom') {
+    return {
+      provider: 'openai-compatible',
+      model: input.model || LIST_MODELS_PROBE,
+      baseUrl: input.baseUrl.trim(),
+    };
+  }
+  return {
+    provider: input.engine,
+    model: input.model || LIST_MODELS_PROBE,
+  };
+}
 
 export function buildProviderConfig(input: {
   engine: EngineKind;
@@ -181,7 +272,10 @@ export function buildProviderConfig(input: {
 }
 
 export async function persistEngineSettings(
-  deps: Pick<SettingsSectionsDeps, 'requestProviderPermission' | 'updateSettings'>,
+  deps: Pick<
+    SettingsSectionsDeps,
+    'requestProviderPermission' | 'updateSettings' | 'getApiKey' | 'setApiKey'
+  >,
   input: {
     engine: EngineKind;
     presetId: PresetId;
@@ -192,6 +286,8 @@ export async function persistEngineSettings(
     freeOnly: boolean;
   },
 ): Promise<PersistResult> {
+  const secrets = resolveSecretsDeps(deps);
+  const id = secretKeyId(input.engine, input.presetId);
   const permissionUrl = permissionBaseUrl(
     input.engine,
     input.presetId,
@@ -202,7 +298,13 @@ export async function persistEngineSettings(
     const granted = await deps.requestProviderPermission(permissionUrl);
     if (!granted) return 'permission';
   }
-  if (input.engine !== 'custom' && !input.apiKey.trim()) return 'invalid-key';
+  const apiKey = await keyForValidation(
+    secrets.getApiKey,
+    id,
+    input.apiKey,
+    input.engine,
+  );
+  if (apiKey === undefined) return 'invalid-key';
   const model = input.model.trim();
   if (
     !isEngineModelAllowed(
@@ -215,7 +317,8 @@ export async function persistEngineSettings(
   ) {
     return 'invalid-model';
   }
-  const provider = buildProviderConfig({ ...input, model });
+  await secrets.setApiKey(id, apiKey);
+  const provider = buildProviderSettings({ ...input, model });
   if (input.engine === 'preset') {
     await deps.updateSettings({ provider, preset: input.presetId });
   } else {
@@ -314,12 +417,19 @@ export function SettingsSections({
   const [engine, setEngine] = useState<EngineKind>('gemini');
   const [presetId, setPresetId] = useState<PresetId>('groq');
   const [apiKey, setApiKey] = useState('');
+  const keyDraft = useRef('');
+  const keyDirty = useRef(false);
+  const keyLoadVersion = useRef(0);
+  const [storedKeyPresent, setStoredKeyPresent] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [model, setModel] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [freeOnly, setFreeOnly] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const syncedFingerprint = useRef('');
+  const secrets = useMemo(() => resolveSecretsDeps(deps), [deps]);
+  const confirmDialog =
+    deps.confirm ?? ((message: string) => window.confirm(message));
 
   const rowClass = compact ? 'lp-settings-row' : 'options__row';
   const btnClass = compact ? 'lp-settings-btn' : 'options__btn';
@@ -336,7 +446,7 @@ export function SettingsSections({
   const displayModeId = `${idPrefix}-display-mode`;
 
   const resetEngineDraft = () => {
-    setApiKey('');
+    keyDirty.current = false;
     setModel('');
     setBaseUrl('');
     setModels([]);
@@ -344,22 +454,43 @@ export function SettingsSections({
     setError(undefined);
   };
 
-  const syncEngineForm = (next: Settings) => {
+  const loadSecretDraft = async (
+    nextEngine: EngineKind,
+    nextPreset: PresetId,
+  ) => {
+    const id = secretKeyId(nextEngine, nextPreset);
+    const version = ++keyLoadVersion.current;
+    const stored = await secrets.getApiKey(id);
+    if (version !== keyLoadVersion.current) return;
+    if (!keyDirty.current) {
+      keyDraft.current = stored ?? '';
+      setApiKey(keyDraft.current);
+    }
+    setStoredKeyPresent(stored !== undefined);
+  };
+
+  const applySettingsToForm = async (next: Settings) => {
     const inferred = inferEngine(next);
     setEngine(inferred.engine);
     if (inferred.presetId) setPresetId(inferred.presetId);
-    setApiKey(next.provider?.apiKey ?? '');
     setModel(next.provider?.model ?? '');
     setBaseUrl(next.provider?.baseUrl ?? '');
     setModels([]);
+    await loadSecretDraft(inferred.engine, inferred.presetId ?? presetId);
     syncedFingerprint.current = providerFingerprint(next);
   };
 
   useEffect(() => {
-    if (providerFingerprint(settings) !== syncedFingerprint.current) {
-      syncEngineForm(settings);
-    }
+    if (providerFingerprint(settings) === syncedFingerprint.current) return;
+    void applySettingsToForm(settings);
   }, [settings]);
+
+  useEffect(() => {
+    const stop = onSecretsChanged(() => {
+      void loadSecretDraft(engine, presetId);
+    });
+    return stop;
+  }, [engine, presetId]);
 
   const modelChoices = useMemo(
     () => listModelChoices(engine, presetId, models, freeOnly),
@@ -389,10 +520,21 @@ export function SettingsSections({
     setError(undefined);
     setMessage(undefined);
     try {
+      const id = secretKeyId(engine, presetId);
+      const resolvedKey = await keyForValidation(
+        secrets.getApiKey,
+        id,
+        keyDraft.current,
+        engine,
+      );
+      if (resolvedKey === undefined) {
+        setError(strings.options.invalidKey);
+        return;
+      }
       const result = await validateProviderKey(deps, {
         engine,
         presetId,
-        apiKey,
+        apiKey: resolvedKey,
         model,
         baseUrl,
       });
@@ -413,9 +555,38 @@ export function SettingsSections({
         return;
       }
       setModels(result.models);
-      const picked = pickDefaultModel(engine, presetId, result.models, freeOnly);
+      const picked = pickDefaultModel(
+        engine,
+        presetId,
+        result.models,
+        freeOnly,
+      );
       if (picked) setModel(picked);
       setMessage(strings.options.validateOk);
+    } catch {
+      setError(strings.options.requestFailed);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteStoredKey = async () => {
+    const id = secretKeyId(engine, presetId);
+    if (!storedKeyPresent) return;
+    const label = engineDisplayName(engine, presetId);
+    if (!confirmDialog(strings.options.deleteKeyConfirm(label))) return;
+    setBusy(true);
+    setError(undefined);
+    setMessage(undefined);
+    try {
+      await secrets.clearApiKey(id);
+      keyDirty.current = false;
+      keyDraft.current = '';
+      keyLoadVersion.current++;
+      setApiKey('');
+      setStoredKeyPresent(false);
+      setModels([]);
+      setMessage(strings.options.keyDeleted);
     } catch {
       setError(strings.options.requestFailed);
     } finally {
@@ -431,7 +602,7 @@ export function SettingsSections({
       const result: PersistResult = await persistEngineSettings(deps, {
         engine,
         presetId,
-        apiKey,
+        apiKey: keyDraft.current,
         model,
         baseUrl,
         models,
@@ -453,9 +624,12 @@ export function SettingsSections({
         );
         return;
       }
+      keyDirty.current = false;
       setMessage(strings.options.saved);
       const next = await deps.getSettings();
       syncedFingerprint.current = providerFingerprint(next);
+      const id = secretKeyId(engine, presetId);
+      setStoredKeyPresent((await secrets.getApiKey(id)) !== undefined);
       onSaved?.();
     } catch {
       setError(strings.options.requestFailed);
@@ -495,19 +669,27 @@ export function SettingsSections({
             const value = (event.currentTarget as HTMLSelectElement).value;
             resetEngineDraft();
             if (value.startsWith('preset:')) {
+              const nextPreset = value.slice(7) as PresetId;
               setEngine('preset');
-              setPresetId(value.slice(7) as PresetId);
+              setPresetId(nextPreset);
+              void loadSecretDraft('preset', nextPreset);
               return;
             }
-            setEngine(value as EngineKind);
+            const nextEngine = value as EngineKind;
+            setEngine(nextEngine);
+            void loadSecretDraft(nextEngine, presetId);
           }}
         >
           <option value="gemini">{strings.options.engineGemini}</option>
           <option value="openai">{strings.options.engineOpenai}</option>
           <option value="anthropic">{strings.options.engineAnthropic}</option>
-          <option value="preset:deepseek">{strings.options.engineDeepseek}</option>
+          <option value="preset:deepseek">
+            {strings.options.engineDeepseek}
+          </option>
           <option value="preset:groq">{strings.options.engineGroq}</option>
-          <option value="preset:openrouter">{strings.options.engineOpenrouter}</option>
+          <option value="preset:openrouter">
+            {strings.options.engineOpenrouter}
+          </option>
           <option value="custom">{strings.options.engineCustom}</option>
         </select>
 
@@ -536,9 +718,14 @@ export function SettingsSections({
                   value={apiKey}
                   autoComplete="off"
                   disabled={busy}
-                  onInput={(event) =>
-                    setApiKey((event.currentTarget as HTMLInputElement).value)
-                  }
+                  onInput={(event) => {
+                    keyDirty.current = true;
+                    keyLoadVersion.current++;
+                    keyDraft.current = (
+                      event.currentTarget as HTMLInputElement
+                    ).value;
+                    setApiKey(keyDraft.current);
+                  }}
                 />
               ) : (
                 <input
@@ -547,9 +734,14 @@ export function SettingsSections({
                   value={apiKey}
                   autoComplete="off"
                   disabled={busy}
-                  onInput={(event) =>
-                    setApiKey((event.currentTarget as HTMLInputElement).value)
-                  }
+                  onInput={(event) => {
+                    keyDirty.current = true;
+                    keyLoadVersion.current++;
+                    keyDraft.current = (
+                      event.currentTarget as HTMLInputElement
+                    ).value;
+                    setApiKey(keyDraft.current);
+                  }}
                 />
               )}
               <button
@@ -563,6 +755,16 @@ export function SettingsSections({
               >
                 {showKey ? strings.options.hideKey : strings.options.showKey}
               </button>
+              {storedKeyPresent ? (
+                <button
+                  type="button"
+                  class={btnClass}
+                  disabled={busy}
+                  onClick={() => void deleteStoredKey()}
+                >
+                  {strings.options.deleteKey}
+                </button>
+              ) : null}
             </div>
 
             {engine === 'custom' ? (
@@ -629,7 +831,9 @@ export function SettingsSections({
             ) : (
               <>
                 <select id={modelId} disabled>
-                  <option value="">{strings.options.validateModelsFirst}</option>
+                  <option value="">
+                    {strings.options.validateModelsFirst}
+                  </option>
                 </select>
                 <p class={noticeClass}>{strings.options.validateModelsFirst}</p>
               </>
@@ -642,7 +846,9 @@ export function SettingsSections({
                 disabled={busy}
                 onClick={() => void validateKey()}
               >
-                {busy ? strings.options.validating : strings.options.validateKey}
+                {busy
+                  ? strings.options.validating
+                  : strings.options.validateKey}
               </button>
               <button
                 type="button"
@@ -654,6 +860,54 @@ export function SettingsSections({
               </button>
             </div>
             <p class={noticeClass}>{strings.options.privacy}</p>
+            {compact ? (
+              <p class={noticeClass}>
+                {strings.options.limitsHintPopup}{' '}
+                {onOpenAdvancedOptions ? (
+                  <button
+                    type="button"
+                    class={compact ? 'lp-settings-link' : 'options__btn'}
+                    disabled={busy}
+                    onClick={onOpenAdvancedOptions}
+                  >
+                    {strings.popup.openAdvancedOptions}
+                  </button>
+                ) : null}
+              </p>
+            ) : (
+              <div class="options__limits">
+                <p class={noticeClass}>{strings.options.limitsIntro}</p>
+                <ul class="options__limits-list">
+                  <li>
+                    <a
+                      href={LIMIT_LINKS.openai}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {strings.options.limitsOpenAi}
+                    </a>
+                  </li>
+                  <li>
+                    <a
+                      href={LIMIT_LINKS.anthropic}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {strings.options.limitsAnthropic}
+                    </a>
+                  </li>
+                  <li>
+                    <a
+                      href={LIMIT_LINKS.gemini}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {strings.options.limitsGemini}
+                    </a>
+                  </li>
+                </ul>
+              </div>
+            )}
           </>
         )}
       </section>

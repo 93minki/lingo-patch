@@ -14,6 +14,7 @@ import { createProvider, ProviderError } from '../providers';
 import type { CacheDb } from '../storage/cache-db';
 import type { TabStatus } from './extension';
 import type { Settings } from '../storage/settings';
+import type { ProviderConfig } from '../providers/types';
 import {
   isPageMessage,
   type BackgroundPayload,
@@ -45,8 +46,10 @@ export function createPageService(
   initial: Settings,
   onStatus?: (tabId: number, status?: TabStatus) => void,
   initialGlossary: Glossary = { ...emptyGlossary(), useDefaults: false },
+  initialProvider: ProviderConfig | null = null,
 ) {
   let settings = initial;
+  let providerConfig = initialProvider;
   let glossary = initialGlossary;
   let revision = 0;
   const connections = new Map<number, Connection>();
@@ -72,7 +75,7 @@ export function createPageService(
       targetLang: settings.targetLang,
       autoEnabled: settings.autoSites.includes(connection.hostname),
       revision,
-      configured: Boolean(settings.provider),
+      configured: Boolean(providerConfig),
       skipFixedBars: settings.skipFixedBars,
       glossary: effectiveGlossary(glossary, connection.hostname),
       hoverModifier: settings.hoverModifier ?? 'alt',
@@ -81,14 +84,14 @@ export function createPageService(
   const status = (connection: Connection): TabStatus => ({
     ...connection.stats,
     available: true,
-    configured: Boolean(settings.provider),
+    configured: Boolean(providerConfig),
     hostname: connection.hostname,
     origin: connection.origin,
     autoEnabled: settings.autoSites.includes(connection.hostname),
     displayMode: settings.displayMode,
   });
   const configure = () => {
-    const cfg = settings.provider;
+    const cfg = providerConfig;
     const selected = cfg ? createProvider(cfg) : undefined;
     const targetLang = settings.targetLang;
     const sourceContexts = (contexts = new Map());
@@ -184,7 +187,7 @@ export function createPageService(
     }
     const currentQueue = queue;
     const currentTasks = tasks;
-    const currentProvider = settings.provider;
+    const currentProvider = providerConfig;
     const currentContexts = contexts;
     const currentGlossaries = glossaries;
     const siteGlossary = effectiveGlossary(glossary, connection.hostname);
@@ -327,14 +330,20 @@ export function createPageService(
       });
       mode(connection);
     },
-    update(next: Settings) {
+    configured: () => Boolean(providerConfig),
+    invalidateSecrets(ids: string[]) {
+      const id = settings.preset ?? settings.provider?.provider;
+      if (id && providerConfig && ids.includes(id)) this.update(settings, null);
+    },
+    update(next: Settings, nextProvider: ProviderConfig | null = null) {
       const changed =
         JSON.stringify([
-          settings.provider,
+          providerConfig,
           settings.preset,
           settings.targetLang,
-        ]) !== JSON.stringify([next.provider, next.preset, next.targetLang]);
+        ]) !== JSON.stringify([nextProvider, next.preset, next.targetLang]);
       settings = next;
+      providerConfig = nextProvider;
       if (changed) {
         queue.abortAll();
         revision++;

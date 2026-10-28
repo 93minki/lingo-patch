@@ -73,7 +73,7 @@ test('normalizeSettings does not share fallback arrays or cache objects', () => 
 test('normalizeSettings merges defaults for corrupted fields', () => {
   expect(
     normalizeSettings({
-      provider: { provider: 'openai', apiKey: 1, model: 'gpt' },
+      provider: { provider: 'openai', model: '' },
       targetLang: '',
       autoSites: [1, 'ok'],
       displayMode: 'invalid',
@@ -103,17 +103,16 @@ test('normalizeSettings keeps a valid provider config', () => {
     }).provider,
   ).toEqual({
     provider: 'gemini',
-    apiKey: 'test-key',
     model: 'gemini-2.5-flash',
   });
 });
 
-test('parseProvider rules for apiKey and baseUrl', () => {
+test('provider settings exclude keys and validate baseUrl', () => {
   expect(
     normalizeSettings({
       provider: { provider: 'openai', apiKey: '', model: 'gpt-6-luna' },
     }).provider,
-  ).toBeNull();
+  ).toEqual({ provider: 'openai', model: 'gpt-6-luna' });
   expect(
     normalizeSettings({
       provider: {
@@ -125,7 +124,6 @@ test('parseProvider rules for apiKey and baseUrl', () => {
     }).provider,
   ).toEqual({
     provider: 'openai-compatible',
-    apiKey: '',
     model: 'llama3',
     baseUrl: 'http://127.0.0.1:11434/v1',
   });
@@ -162,14 +160,13 @@ test('updateSettings rejects invalid provider patches', async () => {
     'lp-settings': {
       provider: {
         provider: 'openai',
-        apiKey: 'keep',
         model: 'gpt-6-luna',
       },
     },
   });
   await expect(
     updateSettings({
-      provider: { provider: 'openai', apiKey: 'x', model: '' },
+      provider: { provider: 'openai', model: '' },
     }),
   ).resolves.toMatchObject({ provider: null });
 });

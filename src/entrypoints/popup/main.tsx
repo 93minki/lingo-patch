@@ -15,6 +15,7 @@ import {
   updateSettings,
   type Settings,
 } from '../../storage/settings';
+import { clearApiKey, getApiKey, setApiKey } from '../../storage/secrets';
 import { KEY_LINKS } from '../../ui/key-links';
 import { SettingsSections } from '../../ui/SettingsSections';
 import { strings } from '../../ui/strings';
@@ -168,6 +169,10 @@ function PopupSettingsView({
             updateSettings: deps.updateSettings,
             getSettings: deps.getSettings,
             requestProviderPermission: deps.requestProviderPermission,
+            getApiKey,
+            setApiKey,
+            clearApiKey,
+            confirm: deps.confirm,
           }}
           busy={busy}
           setBusy={setBusy}

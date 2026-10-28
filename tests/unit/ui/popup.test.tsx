@@ -16,6 +16,16 @@ import {
 } from '../../../src/storage/settings';
 import { strings } from '../../../src/ui/strings';
 
+const storageMocks = vi.hoisted(() => ({
+  localData: {} as Record<string, unknown>,
+  listeners: [] as Array<
+    (
+      changes: Record<string, { newValue?: unknown; oldValue?: unknown }>,
+      area: string,
+    ) => void
+  >,
+}));
+
 vi.mock('wxt/browser', () => ({
   browser: {
     tabs: { query: vi.fn() },
@@ -24,8 +34,83 @@ vi.mock('wxt/browser', () => ({
       sendMessage: vi.fn(),
       getURL: (path: string) => `chrome-extension://test${path}`,
     },
+    storage: {
+      local: {
+        get: vi.fn(
+          async (keys?: string | string[] | Record<string, unknown> | null) => {
+            if (keys === null || keys === undefined) {
+              return { ...storageMocks.localData };
+            }
+            if (typeof keys === 'string') {
+              return { [keys]: storageMocks.localData[keys] };
+            }
+            if (Array.isArray(keys)) {
+              return Object.fromEntries(
+                keys.map((key) => [key, storageMocks.localData[key]]),
+              );
+            }
+            return { ...storageMocks.localData };
+          },
+        ),
+        set: vi.fn(async (items: Record<string, unknown>) => {
+          const changes: Record<
+            string,
+            { newValue?: unknown; oldValue?: unknown }
+          > = {};
+          for (const [key, value] of Object.entries(items)) {
+            changes[key] = {
+              oldValue: storageMocks.localData[key],
+              newValue: value,
+            };
+            storageMocks.localData[key] = value;
+          }
+          for (const listener of storageMocks.listeners) {
+            listener(changes, 'local');
+          }
+        }),
+        remove: vi.fn(async (keys: string | string[]) => {
+          const list = Array.isArray(keys) ? keys : [keys];
+          const changes: Record<
+            string,
+            { newValue?: unknown; oldValue?: unknown }
+          > = {};
+          for (const key of list) {
+            changes[key] = {
+              oldValue: storageMocks.localData[key],
+              newValue: undefined,
+            };
+            delete storageMocks.localData[key];
+          }
+          for (const listener of storageMocks.listeners) {
+            listener(changes, 'local');
+          }
+        }),
+      },
+      onChanged: {
+        addListener: (listener: (typeof storageMocks.listeners)[number]) => {
+          storageMocks.listeners.push(listener);
+        },
+        removeListener: (listener: (typeof storageMocks.listeners)[number]) => {
+          storageMocks.listeners = storageMocks.listeners.filter(
+            (item) => item !== listener,
+          );
+        },
+      },
+    },
   },
 }));
+
+function readSecrets(): Record<string, string> {
+  const stored = storageMocks.localData['lp-secrets'];
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+    return {};
+  }
+  return stored as Record<string, string>;
+}
+
+function writeSecrets(secrets: Record<string, string>) {
+  storageMocks.localData['lp-secrets'] = secrets;
+}
 
 const status = (patch: Partial<TabStatus> = {}): TabStatus => ({
   available: true,
@@ -101,6 +186,8 @@ function mount(
 
 beforeEach(() => {
   document.body.innerHTML = '';
+  storageMocks.localData = {};
+  storageMocks.listeners.length = 0;
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -479,5 +566,85 @@ test('subscribes to settings changes while settings view is open', async () => {
       '#popup-target-lang',
     ) as HTMLSelectElement;
     expect(select?.value).toBe('en');
+  });
+});
+
+test('popup delete key confirms and preserves other provider secrets', async () => {
+  writeSecrets({ openai: 'openai-secret', gemini: 'gemini-secret' });
+  const settingsDeps = createSettingsDeps({
+    ...DEFAULT_SETTINGS,
+    provider: { provider: 'openai', model: 'gpt-test' },
+  });
+  const uiRequest = vi.fn(async (request: UiRequest) => {
+    if (request.type === 'getTabStatus')
+      return { ok: true, status: status({ configured: false }) };
+    return { ok: false, error: 'bad_request' as const };
+  });
+  const confirm = vi.fn(() => true);
+  const { root } = mount(uiRequest, confirm, vi.fn(), settingsDeps);
+  await waitReady(root);
+  await openPopupSettings(root);
+  await vi.waitFor(() =>
+    expect(
+      (root.querySelector('#popup-api-key') as HTMLInputElement).value,
+    ).toBe('openai-secret'),
+  );
+  [...root.querySelectorAll('button')]
+    .find((node) => node.textContent === strings.options.deleteKey)
+    ?.click();
+  expect(confirm).toHaveBeenCalledWith(
+    strings.options.deleteKeyConfirm(strings.options.engineOpenai),
+  );
+  await vi.waitFor(() =>
+    expect(
+      (root.querySelector('#popup-api-key') as HTMLInputElement).value,
+    ).toBe(''),
+  );
+  expect(readSecrets()).toEqual({ gemini: 'gemini-secret' });
+  expect(settingsDeps.updateSettings).not.toHaveBeenCalledWith(
+    expect.objectContaining({ provider: null }),
+  );
+});
+
+test('popup save stores api key in lp-secrets without provider.apiKey', async () => {
+  const settingsDeps = createSettingsDeps();
+  const uiRequest = vi.fn(async (request: UiRequest) => {
+    if (request.type === 'getTabStatus')
+      return {
+        ok: true,
+        status: status({
+          configured: Boolean(settingsDeps.current.provider),
+          available: true,
+        }),
+      };
+    if (request.type === 'validateProvider')
+      return { ok: true, models: ['gemini-2.5-pro'] };
+    return { ok: false, error: 'bad_request' as const };
+  });
+  const { root } = mount(
+    uiRequest,
+    vi.fn(() => true),
+    vi.fn(),
+    settingsDeps,
+  );
+  await waitReady(root);
+  await openPopupSettings(root);
+  const apiKey = root.querySelector('#popup-api-key') as HTMLInputElement;
+  apiKey.value = 'popup-secret';
+  apiKey.dispatchEvent(new Event('input', { bubbles: true }));
+  [...root.querySelectorAll('button')]
+    .find((node) => node.textContent === strings.options.validateKey)
+    ?.click();
+  await vi.waitFor(() =>
+    expect(root.textContent).toContain(strings.options.validateOk),
+  );
+  [...root.querySelectorAll('button')]
+    .find((node) => node.textContent === strings.options.save)
+    ?.click();
+  await vi.waitFor(() => expect(readSecrets().gemini).toBe('popup-secret'));
+  const patch = settingsDeps.updateSettings.mock.calls.at(-1)?.[0];
+  expect(patch?.provider).toEqual({
+    provider: 'gemini',
+    model: 'gemini-2.5-pro',
   });
 });

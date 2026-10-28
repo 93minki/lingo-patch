@@ -255,3 +255,14 @@ body {
     padding: 14px 12px 24px;
   }
 }
+
+.options__limits-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--lp-muted);
+}
+
+.options__limits-list a {
+  color: inherit;
+}

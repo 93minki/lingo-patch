@@ -18,7 +18,6 @@ const settings: Settings = {
   provider: {
     provider: 'openai-compatible',
     model: 'test-model',
-    apiKey: 'private-fake-key',
   },
   targetLang: 'ko',
   autoSites: ['site.test'],
@@ -64,7 +63,10 @@ beforeEach(async () => {
     .mockImplementation(async (req: TranslateRequest) => ({
       items: req.items.map((item) => ({ ...item, text: `[KO] ${item.text}` })),
     }));
-  service = createPageService(db, settings);
+  service = createPageService(db, settings, undefined, undefined, {
+    ...settings.provider!,
+    apiKey: 'private-fake-key',
+  });
 });
 afterEach(async () => {
   service.close();
@@ -72,6 +74,43 @@ afterEach(async () => {
 });
 const keyFor = (markup: string) =>
   makeCacheKey({ markup, targetLang: 'ko', promptVersion: PROMPT_VERSION });
+test('removing the current key disposes the provider while cached translations remain available', async () => {
+  const p = port(1);
+  service.connect(p.value);
+  const oldKey = await keyFor('Cached text');
+  const freshKey = await keyFor('New uncached text');
+  await db.putMany([
+    {
+      key: oldKey,
+      value: { translated: '캐시', model: 'm', provider: 'mock' },
+    },
+  ]);
+  service.invalidateSecrets(['gemini']);
+  expect(service.configured()).toBe(true);
+  service.invalidateSecrets(['openai-compatible']);
+  expect(service.configured()).toBe(false);
+  expect(
+    p.messages.filter((message) => message.type === 'mode').at(-1),
+  ).toMatchObject({ configured: false });
+  p.send({ type: 'lookup', generation: 0, keys: [oldKey] });
+  p.send({
+    type: 'translate',
+    generation: 0,
+    items: [{ key: freshKey, markup: 'New uncached text', priority: 2 }],
+  });
+  await vi.waitFor(() => {
+    expect(p.messages).toContainEqual(
+      expect.objectContaining({
+        type: 'cached',
+        entries: [{ key: oldKey, text: '캐시' }],
+      }),
+    );
+    expect(p.messages).toContainEqual(
+      expect.objectContaining({ type: 'failed', key: freshKey }),
+    );
+  });
+  expect(mock.translate).not.toHaveBeenCalled();
+});
 test('provider batches contain only terms that occur in their items', async () => {
   const glossary = {
     global: [
@@ -246,7 +285,10 @@ test('settings changes send only safe state and disconnect cancels outstanding w
   await vi.waitFor(() => expect(mock.translate).toHaveBeenCalledOnce());
   a.disconnect();
   expect(signal!.aborted).toBe(false);
-  service.update({ ...settings, targetLang: 'ja' });
+  service.update(
+    { ...settings, targetLang: 'ja' },
+    { ...settings.provider!, apiKey: 'private-fake-key' },
+  );
   expect(signal!.aborted).toBe(true);
   expect(JSON.stringify(a.messages)).not.toContain('private-fake-key');
 });

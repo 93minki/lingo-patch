@@ -10,6 +10,22 @@ import {
 import { createPageService } from '../messaging/service';
 import { createUiApi } from '../messaging/api';
 import { getGlossary, onGlossaryChanged } from '../storage/glossary';
+import { getApiKey, onSecretsChanged } from '../storage/secrets';
+import type { Settings } from '../storage/settings';
+import type { ProviderConfig } from '../providers/types';
+
+async function configuredProvider(
+  settings: Settings,
+): Promise<ProviderConfig | null> {
+  if (!settings.provider) return null;
+  const apiKey = await getApiKey(settings.preset ?? settings.provider.provider);
+  if (
+    apiKey === undefined ||
+    (!apiKey.trim() && settings.provider.provider !== 'openai-compatible')
+  )
+    return null;
+  return { ...settings.provider, apiKey };
+}
 
 export default defineBackground(() => {
   const e2ePorts = new Set<ReturnType<typeof browser.runtime.connect>>();
@@ -21,10 +37,11 @@ export default defineBackground(() => {
       : Promise.resolve();
   let service: Promise<ReturnType<typeof createPageService>> | undefined;
   const getService = () =>
-    (service ??= ready.then(async () =>
-      createPageService(
+    (service ??= ready.then(async () => {
+      const settings = await getSettings();
+      return createPageService(
         await openCacheDb(),
-        await getSettings(),
+        settings,
         (tabId, status) => {
           void browser.action
             .setBadgeText({
@@ -44,8 +61,9 @@ export default defineBackground(() => {
             .catch(() => {});
         },
         await getGlossary(),
-      ),
-    ));
+        await configuredProvider(settings),
+      );
+    }));
   const uiApi = createUiApi(getService);
   browser.runtime.onMessage.addListener((message: unknown, sender) => {
     if (
@@ -72,11 +90,21 @@ export default defineBackground(() => {
       return uiApi(message, sender);
     return undefined;
   });
-  onSettingsChanged((settings) => {
-    if (service)
-      void service
-        .then((current) => current.update(settings))
-        .catch(() => console.error('Unable to update translation service'));
+  let refreshVersion = 0;
+  const refresh = () => {
+    const version = ++refreshVersion;
+    if (!service) return;
+    void Promise.all([service, getSettings()])
+      .then(async ([current, settings]) => {
+        const provider = await configuredProvider(settings);
+        if (version === refreshVersion) current.update(settings, provider);
+      })
+      .catch(() => console.error('Unable to update translation service'));
+  };
+  onSettingsChanged(refresh);
+  onSecretsChanged((ids) => {
+    if (service) void service.then((current) => current.invalidateSecrets(ids));
+    refresh();
   });
   onGlossaryChanged((value) => {
     if (service) void service.then((current) => current.updateGlossary(value));
@@ -109,7 +137,7 @@ export default defineBackground(() => {
       });
       if (tab?.id === undefined) return;
       if (command === 'toggle-translate') {
-        if (!(await getSettings()).provider)
+        if (!(await getService()).configured())
           await browser.runtime.openOptionsPage();
         (await getService()).toggle(tab.id);
       } else if (command === 'cycle-mode') {
@@ -141,7 +169,10 @@ export default defineBackground(() => {
     return Promise.all([
       schedule(),
       ready.then(async () => {
-        if (details.reason === 'install' && !(await getSettings()).provider)
+        if (
+          details.reason === 'install' &&
+          !(await configuredProvider(await getSettings()))
+        )
           await browser.runtime.openOptionsPage();
       }),
     ]).catch(() => console.error('Unable to initialize extension'));

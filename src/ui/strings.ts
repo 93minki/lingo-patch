@@ -41,8 +41,7 @@ export const strings = {
     customEngineGuide:
       '직접 입력(OpenAI 호환)은 고급 설정 페이지에서 구성할 수 있습니다.',
     openAdvancedOptions: '고급 설정 열기',
-    advancedSettingsLink:
-      '고급 설정 (자동 번역 사이트, 캐시, 단축키)',
+    advancedSettingsLink: '고급 설정 (자동 번역 사이트, 캐시, 단축키)',
     requestFailed: '요청에 실패했습니다',
     retry: '다시 시도',
   },
@@ -70,16 +69,33 @@ export const strings = {
     engineCustom: '직접 입력 (OpenAI 호환)',
     freeModelsOnly: '무료 모델만 보기',
     privacy:
-      'API 키는 이 브라우저에만 저장되고 선택한 AI 제공자로만 전송됩니다. 브라우저 로컬 저장소에 평문으로 보관됩니다.',
-    freeTierNotice:
-      '무료 등급은 입력이 서비스 개선에 사용될 수 있습니다.',
+      'API 키는 브라우저 로컬 저장소의 별도 항목에 저장되며, 선택한 AI 제공자로만 전송됩니다. 암호화되지 않은 평문입니다.',
+    deleteKey: '키 삭제',
+    deleteKeyConfirm(providerName: string) {
+      return `저장된 ${providerName} API 키를 삭제할까요? 삭제하면 번역이 중지됩니다.`;
+    },
+    keyDeleted: 'API 키를 삭제했습니다.',
+    clearAllKeys: '저장된 모든 API 키 삭제',
+    clearAllKeysConfirm:
+      '모든 제공자·프리셋에 저장된 API 키를 삭제할까요? 번역 엔진·모델 설정은 유지되며, 새 번역은 키가 없으면 중지됩니다.',
+    limitsIntro:
+      '키가 유출돼도 피해를 줄이려면 제공자 콘솔에서 사용 한도를 설정하세요.',
+    limitsHintPopup:
+      '키 유출 대비: 제공자 콘솔에서 API 사용 한도를 설정하세요.',
+    limitsOpenAi:
+      'OpenAI: 프로젝트 전용 키와 월 예산 한도(더 강한 한도는 별도 설정)',
+    limitsAnthropic:
+      'Anthropic: 워크스페이스 지출 한도(default workspace 조건 확인)',
+    limitsGemini: 'Gemini: AI Studio에서 Generative Language API만 허용',
+    freeTierNotice: '무료 등급은 입력이 서비스 개선에 사용될 수 있습니다.',
     onboardingFreeTitle: '무료로 시작',
     onboardingFreeGemini1: 'Google AI Studio에서 Gemini API 키를 발급합니다.',
     onboardingFreeGemini2: '아래에서 Gemini를 선택하고 키를 붙여 넣습니다.',
     onboardingFreeGemini3: '「키 확인」으로 연결을 검증한 뒤 모델을 고릅니다.',
     onboardingAlt: '대안:',
     onboardingPaidTitle: '더 좋은 품질',
-    onboardingPaidBody: 'OpenAI, Anthropic, DeepSeek 유료 키를 사용할 수 있습니다.',
+    onboardingPaidBody:
+      'OpenAI, Anthropic, DeepSeek 유료 키를 사용할 수 있습니다.',
     translation: '번역',
     targetLang: '목표 언어',
     defaultDisplayMode: '기본 표시 모드',
@@ -129,7 +145,8 @@ export const strings = {
 } as const;
 
 export function commandLabel(name?: string): string {
-  if (name === 'toggle-translate') return strings.options.commandToggleTranslate;
+  if (name === 'toggle-translate')
+    return strings.options.commandToggleTranslate;
   if (name === 'cycle-mode') return strings.options.commandCycleMode;
   return name ?? strings.options.noCommands;
 }

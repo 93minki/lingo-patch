@@ -1,9 +1,12 @@
 import { browser } from 'wxt/browser';
 import { PRESETS, type PresetId } from '../providers/presets';
 import type { ProviderConfig, ProviderId } from '../providers/types';
+import { migrateApiKey } from './secrets';
+
+export type ProviderSettings = Omit<ProviderConfig, 'apiKey'>;
 
 export interface Settings {
-  provider: ProviderConfig | null;
+  provider: ProviderSettings | null;
   preset?: PresetId;
   targetLang: string;
   skipFixedBars: boolean;
@@ -82,7 +85,7 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
-function parseProvider(value: unknown): ProviderConfig | null {
+function parseProvider(value: unknown): ProviderSettings | null {
   if (value === null) return null;
   if (!isRecord(value)) return null;
   const provider = value.provider;
@@ -91,12 +94,9 @@ function parseProvider(value: unknown): ProviderConfig | null {
     !PROVIDER_IDS.includes(provider as ProviderId)
   )
     return null;
-  if (typeof value.apiKey !== 'string') return null;
-  if (value.apiKey === '' && provider !== 'openai-compatible') return null;
   if (typeof value.model !== 'string' || value.model.trim() === '') return null;
-  const cfg: ProviderConfig = {
+  const cfg: ProviderSettings = {
     provider: provider as ProviderId,
-    apiKey: value.apiKey,
     model: value.model,
   };
   if (value.baseUrl !== undefined) {
@@ -202,7 +202,36 @@ function enqueueWrite<T>(task: () => Promise<T>): Promise<T> {
 
 export async function getSettings(): Promise<Settings> {
   const stored = await browser.storage.local.get(STORAGE_KEY);
-  return normalizeSettings(stored[STORAGE_KEY]);
+  const raw = stored[STORAGE_KEY];
+  if (
+    isRecord(raw) &&
+    isRecord(raw.provider) &&
+    typeof raw.provider.apiKey === 'string'
+  ) {
+    const parsed = parseProvider(raw.provider);
+    if (parsed) {
+      const id = parsePreset(raw.preset) ?? parsed.provider;
+      await migrateApiKey(id, raw.provider.apiKey);
+      const latest = (await browser.storage.local.get(STORAGE_KEY))[
+        STORAGE_KEY
+      ];
+      if (
+        isRecord(latest) &&
+        isRecord(latest.provider) &&
+        latest.provider.apiKey === raw.provider.apiKey &&
+        latest.provider.provider === raw.provider.provider
+      ) {
+        const cleaned = { ...latest.provider };
+        delete cleaned.apiKey;
+        await browser.storage.local.set({
+          [STORAGE_KEY]: { ...latest, provider: cleaned },
+        });
+        return normalizeSettings({ ...latest, provider: cleaned });
+      }
+      return normalizeSettings(latest);
+    }
+  }
+  return normalizeSettings(raw);
 }
 
 export async function updateSettings(patch: SettingsPatch): Promise<Settings> {

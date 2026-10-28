@@ -120,6 +120,12 @@ test('persistent paragraph cache, original DOM, lazy requests and keyboard modes
     expect(
       await readFile(`.output/${browser}-mv3/background.js`, 'utf8'),
     ).not.toContain('lingo-patch-e2e-mock');
+    expect(
+      await readFile(
+        `.output/${browser}-mv3/content-scripts/content.js`,
+        'utf8',
+      ),
+    ).not.toMatch(/lp-secrets|getApiKey/u);
   }
   expect(await readFile(`${extension}/manifest.json`, 'utf8')).toContain(
     'http://127.0.0.1/*',
@@ -937,6 +943,106 @@ test('P6 glossary, manual translations and cache transfer', async () => {
     }
     await page.keyboard.press('Escape');
     await expect(overlay.getByRole('dialog')).not.toBeVisible();
+  } finally {
+    await context.close();
+    await rm(profile, { recursive: true, force: true });
+  }
+});
+
+test('removing keys stops new requests but keeps cached translations', async () => {
+  const profile = await mkdtemp(path.resolve('.output/e2e-profile-'));
+  const context = await chromium.launchPersistentContext(profile, {
+    channel: 'chromium',
+    headless: true,
+    viewport: { width: 1100, height: 700 },
+    args: [
+      `--disable-extensions-except=${extension}`,
+      `--load-extension=${extension}`,
+    ],
+  });
+  try {
+    await context.route('**/*', (route) =>
+      route.request().url().startsWith(origin) ||
+      route.request().url().startsWith('chrome-extension:')
+        ? route.continue()
+        : route.abort(),
+    );
+    const worker =
+      context.serviceWorkers()[0] ??
+      (await context.waitForEvent('serviceworker'));
+    const extensionRoot = worker.url().split('/').slice(0, 3).join('/');
+    const options = await context.newPage();
+    await options.goto(`${extensionRoot}/options.html`);
+    await expect(options.locator('#lp-api-key')).toBeVisible();
+    await options.evaluate(() =>
+      chrome.storage.local.set({
+        'lp-secrets': {
+          'openai-compatible': 'local-fake-secret',
+          gemini: 'other-fake-secret',
+        },
+      }),
+    );
+    await options.reload();
+    const page = context.pages()[0] ?? (await context.newPage());
+    await page.goto(`${origin}/p6`);
+    await settled(page);
+    const before = await stats();
+    const tabId = await options.evaluate(
+      async (url) => (await chrome.tabs.query({ url }))[0]!.id!,
+      `${origin}/p6`,
+    );
+    options.once('dialog', (dialog) => void dialog.accept());
+    await options.getByRole('button', { name: '키 삭제', exact: true }).click();
+    await expect
+      .poll(async () =>
+        options.evaluate(
+          async (id) =>
+            (
+              await chrome.runtime.sendMessage({
+                scope: 'lp-ui',
+                type: 'getTabStatus',
+                tabId: id,
+              })
+            ).status?.configured,
+          tabId,
+        ),
+      )
+      .toBe(false);
+    const remaining = await options.evaluate(
+      async () => (await chrome.storage.local.get('lp-secrets'))['lp-secrets'],
+    );
+    expect(remaining).not.toHaveProperty('openai-compatible');
+    expect(remaining).toHaveProperty('gemini', 'other-fake-secret');
+    await page.reload();
+    await expect(page.locator('#with-props lp-t')).toContainText('[KO]');
+    expect((await stats()).requests).toBe(before.requests);
+    await page.evaluate(() => {
+      const p = document.createElement('p');
+      p.textContent = 'New uncached text after deletion.';
+      document.body.append(p);
+    });
+    await expect
+      .poll(async () =>
+        page.evaluate(
+          () =>
+            document.querySelector('lp-progress')?.shadowRoot?.textContent ??
+            '',
+        ),
+      )
+      .toContain('설정');
+    expect((await stats()).requests).toBe(before.requests);
+    options.once('dialog', (dialog) => void dialog.accept());
+    await options
+      .getByRole('button', { name: '저장된 모든 API 키 삭제' })
+      .click();
+    await expect
+      .poll(async () =>
+        options.evaluate(
+          async () =>
+            (await chrome.storage.local.get('lp-secrets'))['lp-secrets'],
+        ),
+      )
+      .toBeUndefined();
   } finally {
     await context.close();
     await rm(profile, { recursive: true, force: true });

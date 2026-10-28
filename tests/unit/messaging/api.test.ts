@@ -66,6 +66,7 @@ const state = {
   pending: 1,
 };
 const service = {
+  configured: vi.fn(() => true),
   inspect: vi.fn(),
   status: vi.fn(() => ({ ...state })),
   toggle: vi.fn(),

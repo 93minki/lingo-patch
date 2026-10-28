@@ -14,6 +14,12 @@ import {
   type Settings,
   type SettingsPatch,
 } from '../../storage/settings';
+import {
+  clearAllApiKeys,
+  clearApiKey,
+  getApiKey,
+  setApiKey,
+} from '../../storage/secrets';
 import { KEY_LINKS, SHORTCUTS_HELP_URL } from '../../ui/key-links';
 import { SettingsSections } from '../../ui/SettingsSections';
 import { GlossaryEditor } from '../../ui/GlossaryEditor';
@@ -247,6 +253,10 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
           updateSettings: deps.updateSettings,
           getSettings: deps.getSettings,
           requestProviderPermission: deps.requestProviderPermission,
+          getApiKey,
+          setApiKey,
+          clearApiKey,
+          confirm: deps.confirm,
         }}
         busy={busy}
         setBusy={setBusy}
@@ -443,6 +453,26 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
           {strings.options.skipFixedBars}
         </label>
         <p class="options__notice">{strings.options.skipFixedBarsHint}</p>
+        <button
+          type="button"
+          class="options__btn"
+          disabled={busy}
+          onClick={() => {
+            if (!deps.confirm(strings.options.clearAllKeysConfirm)) return;
+            setBusy(true);
+            setError(undefined);
+            void clearAllApiKeys()
+              .then(() => deps.getSettings())
+              .then((next) => {
+                setSettings(next);
+                setMessage(strings.options.keyDeleted);
+              })
+              .catch(() => setError(strings.options.requestFailed))
+              .finally(() => setBusy(false));
+          }}
+        >
+          {strings.options.clearAllKeys}
+        </button>
         <label for="lp-hover-modifier">호버 번역 수정키</label>
         <select
           id="lp-hover-modifier"
