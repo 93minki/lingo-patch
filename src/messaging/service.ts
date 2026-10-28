@@ -78,7 +78,6 @@ export function createPageService(
       configured: Boolean(providerConfig),
       skipFixedBars: settings.skipFixedBars,
       glossary: effectiveGlossary(glossary, connection.hostname),
-      hoverModifier: settings.hoverModifier ?? 'alt',
       selectionTranslation: settings.selectionTranslation ?? true,
     });
   const status = (connection: Connection): TabStatus => ({

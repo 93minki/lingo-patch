@@ -91,134 +91,6 @@ function inView() {
     } as unknown as IntersectionObserverEntry,
   ]);
 }
-test('hover requests only with configured modifier even when page translation is off', async () => {
-  document.body.innerHTML =
-    '<p>Source paragraph</p><ul><li><div><a><span>Sidebar text</span></a></div></li></ul><input>';
-  dispose = startPagePipeline();
-  receive(mode(false));
-  await nextScan();
-  const paragraph = document.querySelector('p')!;
-  const sidebar = document.querySelector('span')!;
-  messages = [];
-  paragraph.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
-  await Promise.resolve();
-  expect(messages.filter((message) => message.type === 'lookup')).toHaveLength(
-    0,
-  );
-  document.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'Alt', altKey: true, bubbles: true }),
-  );
-  await Promise.resolve();
-  const lookup = messages.find((message) => message.type === 'lookup')!;
-  expect(lookup).toMatchObject({ keys: ['Source paragraph'] });
-  receive({
-    type: 'cached',
-    keys: ['Source paragraph'],
-    entries: [],
-    generation: lookup.generation,
-  });
-  expect(
-    messages.filter((message) => message.type === 'translate'),
-  ).toHaveLength(1);
-  receive({
-    type: 'translated',
-    key: 'Source paragraph',
-    text: '번역문',
-    generation: lookup.generation,
-  });
-  expect(paragraph.querySelector('lp-t')?.textContent).toBe('번역문');
-  paragraph.dispatchEvent(
-    new MouseEvent('mousemove', { bubbles: true, altKey: true }),
-  );
-  await vi.advanceTimersByTimeAsync(20);
-  expect(paragraph.querySelector('lp-t')).not.toBeNull();
-  sidebar.dispatchEvent(
-    new MouseEvent('mousemove', { bubbles: true, altKey: true }),
-  );
-  await vi.advanceTimersByTimeAsync(20);
-  expect(
-    messages.filter((message) => message.type === 'lookup').at(-1),
-  ).toMatchObject({ keys: ['<g0><g1>Sidebar text</g1></g0>'] });
-  document.dispatchEvent(
-    new KeyboardEvent('keyup', { key: 'Alt', bubbles: true }),
-  );
-  paragraph.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
-  document.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'Alt', altKey: true, bubbles: true }),
-  );
-  expect(paragraph.querySelector('lp-t')).toBeNull();
-  document.dispatchEvent(
-    new KeyboardEvent('keyup', { key: 'Alt', bubbles: true }),
-  );
-  (document.querySelector('input') as HTMLInputElement).focus();
-  const count = messages.filter((message) => message.type === 'lookup').length;
-  document.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'Alt', altKey: true, bubbles: true }),
-  );
-  await Promise.resolve();
-  expect(messages.filter((message) => message.type === 'lookup')).toHaveLength(
-    count,
-  );
-});
-
-test('hover without provider reports that configuration is required', async () => {
-  dispose = startPagePipeline();
-  receive({ ...mode(false), configured: false });
-  await nextScan();
-  document
-    .querySelector('p')!
-    .dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
-  document.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'Alt', altKey: true, bubbles: true }),
-  );
-  expect(
-    document.querySelector('lp-progress')!.shadowRoot!.textContent,
-  ).toContain('번역 설정이 필요합니다');
-  expect(
-    messages.filter((message) => message.type === 'translate'),
-  ).toHaveLength(0);
-});
-
-test('configured Control modifier works and off disables hover', async () => {
-  dispose = startPagePipeline();
-  receive({ ...mode(false), hoverModifier: 'control' });
-  await nextScan();
-  document
-    .querySelector('p')!
-    .dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
-  document.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'Alt', altKey: true, bubbles: true }),
-  );
-  expect(messages.filter((message) => message.type === 'lookup')).toHaveLength(
-    0,
-  );
-  document.dispatchEvent(
-    new KeyboardEvent('keydown', {
-      key: 'Control',
-      ctrlKey: true,
-      bubbles: true,
-    }),
-  );
-  await Promise.resolve();
-  expect(messages.filter((message) => message.type === 'lookup')).toHaveLength(
-    1,
-  );
-  document.dispatchEvent(
-    new KeyboardEvent('keyup', { key: 'Control', bubbles: true }),
-  );
-  receive({ ...mode(false), hoverModifier: 'off' });
-  document.dispatchEvent(
-    new KeyboardEvent('keydown', {
-      key: 'Control',
-      ctrlKey: true,
-      bubbles: true,
-    }),
-  );
-  expect(messages.filter((message) => message.type === 'lookup')).toHaveLength(
-    1,
-  );
-});
-
 test('selection button ignores input and disabled setting, closes on escape', async () => {
   dispose = startPagePipeline();
   receive(mode(false));
@@ -246,6 +118,46 @@ test('selection button ignores input and disabled setting, closes on escape', as
   receive({ ...mode(false), selectionTranslation: false });
   paragraph.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
   expect(button.classList.contains('visible')).toBe(false);
+  selection.removeAllRanges();
+});
+
+test('selection translation still looks up escaped text and displays a response while page translation is off', async () => {
+  dispose = startPagePipeline();
+  receive(mode(false));
+  await nextScan();
+  const paragraph = document.querySelector('p')!;
+  paragraph.textContent = 'Use <name> & text';
+  const range = document.createRange();
+  range.selectNodeContents(paragraph);
+  range.getBoundingClientRect = () =>
+    ({ left: 0, right: 100, top: 0, bottom: 20 }) as DOMRect;
+  const selection = document.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(range);
+  paragraph.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  const overlay = document.querySelector('lp-selection-overlay')!.shadowRoot!;
+  (overlay.querySelector('button') as HTMLButtonElement).click();
+  await Promise.resolve();
+  const markup = 'Use &lt;name&gt; &amp; text';
+  const lookup = messages.find((message) => message.type === 'lookup');
+  expect(lookup).toMatchObject({ keys: [markup] });
+  receive({
+    type: 'cached',
+    generation: lookup!.generation,
+    keys: [markup],
+    entries: [],
+  });
+  expect(
+    messages.filter((message) => message.type === 'translate').at(-1),
+  ).toMatchObject({ items: [{ key: markup, markup }] });
+  receive({
+    type: 'translated',
+    generation: lookup!.generation,
+    key: markup,
+    text: '번역 결과',
+  });
+  expect(overlay.querySelector('[role=dialog]')!.textContent).toBe('번역 결과');
+  expect(paragraph.textContent).toBe('Use <name> & text');
   selection.removeAllRanges();
 });
 test('waits for enable, looks up first, requests only nearby misses and toggles without changing source', async () => {

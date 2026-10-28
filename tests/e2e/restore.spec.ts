@@ -840,7 +840,7 @@ test('Next.js sticky header is skipped and short sidebar labels render compact',
   }
 });
 
-test('P6 glossary, manual translations and cache transfer', async () => {
+test('P6 glossary, selection translation and cache transfer', async () => {
   const profile = await mkdtemp(path.resolve('.output/e2e-profile-'));
   const context = await chromium.launchPersistentContext(profile, {
     channel: 'chromium',
@@ -946,44 +946,7 @@ test('P6 glossary, manual translations and cache transfer', async () => {
       tabId,
     );
     await expect(page.locator('lp-t')).toHaveCount(0);
-    await page.evaluate(() => {
-      const p = document.createElement('p');
-      p.id = 'manual';
-      p.textContent = 'Fresh manual hover paragraph.';
-      document.body.append(p);
-      const list = document.createElement('ul');
-      list.innerHTML =
-        '<li><div><a><span>Fresh sidebar hover item.</span></a></div></li>';
-      document.body.append(list);
-    });
-    const beforeHover = await stats();
     await page.bringToFront();
-    const manualBox = (await page.locator('#manual').boundingBox())!;
-    await page.mouse.move(manualBox.x + 20, manualBox.y + manualBox.height / 2);
-    expect((await stats()).requests).toBe(beforeHover.requests);
-    await page.keyboard.down('Alt');
-    await expect(page.locator('#manual lp-t')).toContainText('[KO]');
-    expect((await stats()).items - beforeHover.items).toBe(1);
-    await page.mouse.move(manualBox.x + 25, manualBox.y + manualBox.height / 2);
-    await expect(page.locator('#manual lp-t')).toContainText('[KO]');
-    await page.keyboard.up('Alt');
-    await page.mouse.move(900, 650);
-    await page.keyboard.down('Alt');
-    const sidebar = page.getByText('Fresh sidebar hover item.', {
-      exact: true,
-    });
-    const sidebarBox = (await sidebar.boundingBox())!;
-    await page.mouse.move(
-      sidebarBox.x + 10,
-      sidebarBox.y + sidebarBox.height / 2,
-    );
-    await expect(page.locator('li div > lp-t')).toContainText('[KO]');
-    expect((await stats()).items - beforeHover.items).toBe(2);
-    await page.keyboard.up('Alt');
-    await page.mouse.move(manualBox.x + 20, manualBox.y + manualBox.height / 2);
-    await page.keyboard.down('Alt');
-    await expect(page.locator('#manual lp-t')).toHaveCount(0);
-    await page.keyboard.up('Alt');
     await page.evaluate(() => {
       const text = document.querySelector('#other')!.firstChild!;
       const range = document.createRange();

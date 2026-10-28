@@ -544,22 +544,6 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
         >
           {strings.options.clearAllKeys}
         </button>
-        <label for="lp-hover-modifier">호버 번역 수정키</label>
-        <select
-          id="lp-hover-modifier"
-          value={settings.hoverModifier ?? 'alt'}
-          onChange={(event) =>
-            void saveGeneral({
-              hoverModifier: (event.currentTarget as HTMLSelectElement)
-                .value as Settings['hoverModifier'],
-            })
-          }
-        >
-          <option value="alt">Alt / Option</option>
-          <option value="control">Control</option>
-          <option value="shift">Shift</option>
-          <option value="off">끄기</option>
-        </select>
         <label class="options__row">
           <input
             type="checkbox"

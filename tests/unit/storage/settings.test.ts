@@ -51,6 +51,21 @@ test('getSettings returns defaults when storage is empty', async () => {
   await expect(getSettings()).resolves.toEqual(DEFAULT_SETTINGS);
 });
 
+test('ignores the removed hover setting in existing stored settings', async () => {
+  mocks.get.mockResolvedValue({
+    'lp-settings': { hoverModifier: 'shift', targetLang: 'ja' },
+  });
+  const settings = await getSettings();
+  expect(settings.targetLang).toBe('ja');
+  expect(settings).not.toHaveProperty('hoverModifier');
+  await updateSettings({ displayMode: 'original' });
+  expect(mocks.set).toHaveBeenCalledWith({
+    'lp-settings': expect.not.objectContaining({
+      hoverModifier: expect.anything(),
+    }),
+  });
+});
+
 test('returned settings are isolated from DEFAULT_SETTINGS', async () => {
   const first = await getSettings();
   first.autoSites.push('example.com');
@@ -82,7 +97,6 @@ test('normalizeSettings merges defaults for corrupted fields', () => {
     }),
   ).toEqual({
     provider: null,
-    hoverModifier: 'alt',
     selectionTranslation: true,
     skipFixedBars: true,
     targetLang: 'ko',

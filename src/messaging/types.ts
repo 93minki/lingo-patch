@@ -41,7 +41,6 @@ export type BackgroundMessage = { generation: number } & (
       configured: boolean;
       skipFixedBars: boolean;
       glossary?: GlossaryEntry[];
-      hoverModifier?: 'alt' | 'control' | 'shift' | 'off';
       selectionTranslation?: boolean;
     }
   | { type: 'toggle' }

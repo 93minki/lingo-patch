@@ -13,7 +13,6 @@ import { isContentPing } from '../messaging/content-ping';
 import type { GlossaryEntry } from '../core/glossary/types';
 import { createSelectionOverlay } from './selection-overlay';
 import { deserialize } from '../core/segment';
-import { findHoverSegment } from './hover-segment';
 
 declare global {
   interface Window {
@@ -33,14 +32,8 @@ export function startPagePipeline() {
   let error: ProviderError['kind'] | 'unconfigured' | undefined;
   let configured = false;
   let glossary: GlossaryEntry[] = [];
-  let hoverModifier: 'alt' | 'control' | 'shift' | 'off' = 'alt';
   let selectionTranslation = true;
-  const manual = new Map<
-    string,
-    { markup: string; record?: RenderRecord; selection?: boolean }
-  >();
-  const manualBlocks = new Map<Element, RenderRecord>();
-  const hiddenBlocks = new Set<Element>();
+  const selectionRequests = new Map<string, string>();
   let skipFixedBars = true;
   let forceAll = false;
   const progress = createProgress(document, () => {
@@ -240,8 +233,7 @@ export function startPagePipeline() {
         }
         record.segment = segment;
         next.push(record);
-        if (memory.has(key) && !hiddenBlocks.has(segment.block))
-          renderer.render(record, 'ready', memory.get(key));
+        if (memory.has(key)) renderer.render(record, 'ready', memory.get(key));
       }
       for (const old of records) if (!next.includes(old)) renderer.remove(old);
       records = next;
@@ -294,10 +286,8 @@ export function startPagePipeline() {
     intersection?.disconnect();
     if (scanTimer) clearTimeout(scanTimer);
     scanTimer = undefined;
-    renderer.clear([...records, ...manualBlocks.values()]);
-    manualBlocks.clear();
-    hiddenBlocks.clear();
-    manual.clear();
+    renderer.clear(records);
+    selectionRequests.clear();
     records = [];
     requested.clear();
     memory.clear();
@@ -345,7 +335,6 @@ export function startPagePipeline() {
       glossary = message.glossary ?? [];
       skipFixedBars = message.skipFixedBars;
       configured = message.configured;
-      hoverModifier = message.hoverModifier ?? 'alt';
       selectionTranslation = message.selectionTranslation !== false;
       const changed = message.targetLang !== targetLang;
       if (lastAuto === undefined || lastAuto !== message.autoEnabled)
@@ -406,23 +395,21 @@ export function startPagePipeline() {
     }
     if (message.type === 'cached') {
       for (const key of message.keys) {
-        const item = manual.get(key);
-        if (!item) continue;
+        const markup = selectionRequests.get(key);
+        if (markup === undefined) continue;
         const found = message.entries.find((entry) => entry.key === key);
-        if (found) finishManual(key, found.text);
+        if (found) finishSelection(key, found.text);
         else
           post({
             type: 'translate',
-            items: [{ key, markup: item.markup, priority: 2 }],
+            items: [{ key, markup, priority: 2 }],
           });
       }
     } else if (message.type === 'translated')
-      finishManual(message.key, message.text);
-    else if (message.type === 'failed' && manual.has(message.key)) {
-      const item = manual.get(message.key)!;
-      if (item.record) renderer.render(item.record, 'error');
-      if (item.selection) selectionOverlay.showResult('번역하지 못했습니다.');
-      manual.delete(message.key);
+      finishSelection(message.key, message.text);
+    else if (message.type === 'failed' && selectionRequests.has(message.key)) {
+      selectionOverlay.showResult('번역하지 못했습니다.');
+      selectionRequests.delete(message.key);
     }
     if (!enabled) return;
     if (message.type === 'cached') {
@@ -468,26 +455,19 @@ export function startPagePipeline() {
       .replace(/&/gu, '&amp;')
       .replace(/</gu, '&lt;')
       .replace(/>/gu, '&gt;');
-    void requestManual(markup, undefined, true);
+    void requestSelection(markup);
   });
-  function finishManual(key: string, text: string) {
-    const item = manual.get(key);
-    if (!item) return;
+  function finishSelection(key: string, text: string) {
+    if (!selectionRequests.has(key)) return;
     memory.set(key, text);
-    if (item.record) renderer.render(item.record, 'ready', text);
-    if (item.selection)
-      selectionOverlay.showResult(
-        deserialize(text, [], document).fragment.textContent ?? '',
-      );
-    manual.delete(key);
+    selectionOverlay.showResult(
+      deserialize(text, [], document).fragment.textContent ?? '',
+    );
+    selectionRequests.delete(key);
   }
-  async function requestManual(
-    markup: string,
-    record?: RenderRecord,
-    selection = false,
-  ) {
+  async function requestSelection(markup: string) {
     if (!connected || !configured) {
-      if (selection) selectionOverlay.showResult('번역 설정을 확인하세요.');
+      selectionOverlay.showResult('번역 설정을 확인하세요.');
       if (!configured) {
         error = 'unconfigured';
         report();
@@ -502,107 +482,10 @@ export function startPagePipeline() {
       glossary,
     });
     if (disposed || generation !== epoch) return;
-    if (record) {
-      ensureStyle(document);
-      record.key = key;
-      manualBlocks.set(record.segment.block, record);
-    }
-    manual.set(key, { markup, record, selection });
-    if (memory.has(key)) finishManual(key, memory.get(key)!);
+    selectionRequests.set(key, markup);
+    if (memory.has(key)) finishSelection(key, memory.get(key)!);
     else post({ type: 'lookup', keys: [key] });
   }
-  let pointer: Element | null = null;
-  let modifierDown = false;
-  let hoverFrame: number | undefined;
-  const visitedBlocks = new Set<Element>();
-  const editing = () =>
-    Boolean(
-      document.activeElement?.closest(
-        'input,textarea,select,[contenteditable]:not([contenteditable="false"])',
-      ),
-    );
-  const activateHover = () => {
-    if (!modifierDown || !pointer || editing()) return;
-    const segment = findHoverSegment(pointer, document.body, targetLang);
-    if (!segment || visitedBlocks.has(segment.block)) return;
-    const block = segment.block;
-    visitedBlocks.add(block);
-    const automatic = records.find(
-      (record) => record.segment.block === block && memory.has(record.key),
-    );
-    if (automatic) {
-      if (hiddenBlocks.has(block)) {
-        hiddenBlocks.delete(block);
-        renderer.render(automatic, 'ready', memory.get(automatic.key));
-      } else {
-        renderer.remove(automatic);
-        automatic.node = undefined;
-        hiddenBlocks.add(block);
-      }
-      return;
-    }
-    const previous = manualBlocks.get(block);
-    if (previous) {
-      renderer.remove(previous);
-      manualBlocks.delete(block);
-      manual.delete(previous.key);
-      return;
-    }
-    const record = renderer.create('', segment);
-    void requestManual(segment.markup, record);
-  };
-  const modifierPressed = (event: MouseEvent) =>
-    hoverModifier === 'alt'
-      ? event.altKey
-      : hoverModifier === 'control'
-        ? event.ctrlKey
-        : hoverModifier === 'shift'
-          ? event.shiftKey
-          : false;
-  const modifierName = () =>
-    hoverModifier === 'alt'
-      ? 'Alt'
-      : hoverModifier === 'control'
-        ? 'Control'
-        : hoverModifier === 'shift'
-          ? 'Shift'
-          : '';
-  const onMouseMove = (event: MouseEvent) => {
-    pointer = event.target instanceof Element ? event.target : null;
-    if (!modifierPressed(event)) {
-      modifierDown = false;
-      visitedBlocks.clear();
-      return;
-    }
-    if (!modifierDown) {
-      modifierDown = true;
-      visitedBlocks.clear();
-    }
-    if (hoverFrame === undefined)
-      hoverFrame = requestAnimationFrame(() => {
-        hoverFrame = undefined;
-        activateHover();
-      });
-  };
-  const onModifierDown = (event: KeyboardEvent) => {
-    if (event.key !== modifierName() || modifierDown || editing()) return;
-    modifierDown = true;
-    visitedBlocks.clear();
-    activateHover();
-  };
-  const onModifierUp = (event: KeyboardEvent) => {
-    if (event.key !== modifierName()) return;
-    modifierDown = false;
-    visitedBlocks.clear();
-  };
-  const onMouseLeave = (event: MouseEvent) => {
-    if (!event.relatedTarget) pointer = null;
-  };
-  const onWindowBlur = () => {
-    pointer = null;
-    modifierDown = false;
-    visitedBlocks.clear();
-  };
   const onSelection = (event: MouseEvent) => {
     if (
       !selectionTranslation ||
@@ -630,11 +513,6 @@ export function startPagePipeline() {
       selection.getRangeAt(0).getBoundingClientRect(),
     );
   };
-  document.addEventListener('mousemove', onMouseMove);
-  document.addEventListener('mouseout', onMouseLeave);
-  document.addEventListener('keydown', onModifierDown);
-  document.addEventListener('keyup', onModifierUp);
-  window.addEventListener('blur', onWindowBlur);
   document.addEventListener('mouseup', onSelection);
   const connect = () => {
     if (disposed || !started) return;
@@ -711,12 +589,6 @@ export function startPagePipeline() {
     window.removeEventListener('pageshow', onPageshow);
     document.removeEventListener('prerenderingchange', onPrerenderingChange);
     browser.runtime.onMessage.removeListener(onPing);
-    document.removeEventListener('mousemove', onMouseMove);
-    document.removeEventListener('mouseout', onMouseLeave);
-    document.removeEventListener('keydown', onModifierDown);
-    document.removeEventListener('keyup', onModifierUp);
-    window.removeEventListener('blur', onWindowBlur);
-    if (hoverFrame !== undefined) cancelAnimationFrame(hoverFrame);
     document.removeEventListener('mouseup', onSelection);
     selectionOverlay.destroy();
     if (window.__lpPipelineDispose === dispose)
