@@ -178,6 +178,78 @@ test('persistent paragraph cache, original DOM, lazy requests and keyboard modes
     await settled(page);
     await sourceUnchanged(page);
     await expect(page.locator('pre lp-t')).toHaveCount(0);
+    const reconnectBefore = await stats();
+    await page.evaluate(() => {
+      const nodes = [...document.querySelectorAll('lp-t')];
+      (window as unknown as { reconnectNodes: Element[] }).reconnectNodes =
+        nodes;
+      (window as unknown as { reconnectRemoved: boolean }).reconnectRemoved =
+        false;
+      new MutationObserver((changes) => {
+        if (
+          changes.some((change) =>
+            [...change.removedNodes].some(
+              (node) =>
+                nodes.includes(node as Element) ||
+                (node.nodeType === 1 &&
+                  nodes.some((item) => (node as Element).contains(item))),
+            ),
+          )
+        )
+          (
+            window as unknown as { reconnectRemoved: boolean }
+          ).reconnectRemoved = true;
+      }).observe(document.body, { childList: true, subtree: true });
+    });
+    const worker =
+      context!.serviceWorkers()[0] ??
+      (await context!.waitForEvent('serviceworker'));
+    const extensionPage = await context!.newPage();
+    await extensionPage.goto(
+      `${worker.url().split('/').slice(0, 3).join('/')}/options.html`,
+    );
+    const disconnectedPorts = await extensionPage.evaluate(() =>
+      chrome.runtime.sendMessage({ scope: 'lp-e2e-ports', disconnect: true }),
+    );
+    expect(disconnectedPorts.count).toBeGreaterThan(0);
+    await expect
+      .poll(
+        async () =>
+          (
+            await extensionPage.evaluate(() =>
+              chrome.runtime.sendMessage({ scope: 'lp-e2e-ports' }),
+            )
+          ).count,
+      )
+      .toBeGreaterThan(0);
+    await expect
+      .poll(async () =>
+        extensionPage.evaluate(async (url) => {
+          const [tab] = await chrome.tabs.query({ url });
+          const result = await chrome.runtime.sendMessage({
+            scope: 'lp-ui',
+            type: 'getTabStatus',
+            tabId: tab?.id,
+          });
+          return result.status?.total ?? 0;
+        }, `${origin}/a`),
+      )
+      .toBeGreaterThan(0);
+    await settled(page);
+    expect(
+      await page.evaluate(() => {
+        const state = window as unknown as {
+          reconnectNodes: Element[];
+          reconnectRemoved: boolean;
+        };
+        return (
+          !state.reconnectRemoved &&
+          state.reconnectNodes.every((node) => node.isConnected)
+        );
+      }),
+    ).toBe(true);
+    expect((await stats()).requests).toBe(reconnectBefore.requests);
+    await extensionPage.close();
     let previous = await stats();
     counts.push({
       scenario: 'A initial',

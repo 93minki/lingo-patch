@@ -3,13 +3,13 @@ import type {
   BackgroundMessage,
   PageMessage,
 } from '../../../src/messaging/types';
-const mock = vi.hoisted(() => ({ connect: vi.fn() }));
+const mock = vi.hoisted(() => ({ connect: vi.fn(), addListener: vi.fn() }));
 vi.mock('wxt/browser', () => ({
   browser: {
     runtime: {
       connect: mock.connect,
       onMessage: {
-        addListener: vi.fn(),
+        addListener: mock.addListener,
         removeListener: vi.fn(),
       },
     },
@@ -19,13 +19,18 @@ vi.mock('../../../src/core/cache/key', () => ({
   makeCacheKey: async ({ markup }: { markup: string }) => markup,
 }));
 import { startPagePipeline } from '../../../src/content/pipeline';
+import { SegmentRenderer } from '../../../src/content/renderer';
+import { CONTENT_PING } from '../../../src/messaging/content-ping';
 let messages: PageMessage[];
 let receive: (message: BackgroundMessage) => void;
 let disconnected: () => void;
 let intersection: (entries: IntersectionObserverEntry[]) => void;
 let observe: ReturnType<typeof vi.fn>;
 let dispose: (() => void) | undefined;
-const mode = (autoEnabled = true, revision = 0): BackgroundMessage => ({
+const mode = (
+  autoEnabled = true,
+  revision = 0,
+): Extract<BackgroundMessage, { type: 'mode' }> => ({
   type: 'mode',
   generation: 0,
   displayMode: 'bilingual',
@@ -217,6 +222,116 @@ test('SPA reset rejects stale results and reconnect scans again', async () => {
   expect(mock.connect).toHaveBeenCalledTimes(2);
   receive(mode());
   await nextScan();
-  expect(messages.at(-1)!.generation).toBeGreaterThan(generation + 1);
+  expect(messages.at(-1)!.generation).toBe(generation + 1);
   history.replaceState({}, '', '/');
+});
+
+test('reconnect keeps rendered nodes, resynchronizes and retries interrupted requests', async () => {
+  document.body.innerHTML = '<p>Source paragraph</p><p>Another paragraph</p>';
+  const clear = vi.spyOn(SegmentRenderer.prototype, 'clear');
+  dispose = startPagePipeline();
+  receive(mode(true, 9));
+  await nextScan();
+  const generation = messages.at(-1)!.generation;
+  receive({
+    type: 'cached',
+    keys: ['Source paragraph', 'Another paragraph'],
+    entries: [{ key: 'Source paragraph', text: '번역문' }],
+    generation,
+  });
+  const node = document.querySelector('lp-t');
+  intersection([
+    {
+      target: document.querySelectorAll('p')[1]!,
+      isIntersecting: true,
+      boundingClientRect: { top: 10, bottom: 30 },
+    } as unknown as IntersectionObserverEntry,
+  ]);
+  disconnected();
+  await vi.advanceTimersByTimeAsync(150);
+  messages = [];
+  clear.mockClear();
+  receive(mode(true, 0));
+  expect(clear).not.toHaveBeenCalled();
+  expect(document.querySelector('lp-t')).toBe(node);
+  expect(messages).toContainEqual({ type: 'reset', generation });
+  expect(messages).toContainEqual({
+    type: 'lookup',
+    keys: ['Source paragraph', 'Another paragraph'],
+    generation,
+  });
+  receive({
+    type: 'cached',
+    keys: ['Source paragraph', 'Another paragraph'],
+    entries: [{ key: 'Source paragraph', text: '번역문' }],
+    generation,
+  });
+  expect(observe).toHaveBeenCalledWith(document.querySelectorAll('p')[1]);
+  intersection([
+    {
+      target: document.querySelectorAll('p')[1]!,
+      isIntersecting: true,
+      boundingClientRect: { top: 10, bottom: 30 },
+    } as unknown as IntersectionObserverEntry,
+  ]);
+  expect(
+    messages.filter((message) => message.type === 'translate').at(-1),
+  ).toMatchObject({ items: [{ key: 'Another paragraph' }] });
+  clear.mockRestore();
+});
+
+test('target language change after reconnect resets, but ping and display changes preserve nodes', async () => {
+  dispose = startPagePipeline();
+  receive(mode());
+  await nextScan();
+  const generation = messages.at(-1)!.generation;
+  receive({
+    type: 'cached',
+    keys: ['Source paragraph'],
+    entries: [{ key: 'Source paragraph', text: '번역문' }],
+    generation,
+  });
+  const node = document.querySelector('lp-t');
+  const clear = vi.spyOn(SegmentRenderer.prototype, 'clear');
+  const ping = mock.addListener.mock.calls.at(-1)![0];
+  const respond = vi.fn();
+  ping(CONTENT_PING, {}, respond);
+  expect(respond).toHaveBeenCalledWith({ ok: true });
+  receive({ ...mode(), displayMode: 'original' });
+  expect(document.querySelector('lp-t')).toBe(node);
+  expect(clear).not.toHaveBeenCalled();
+  expect(document.documentElement.getAttribute('data-lp-mode')).toBe(
+    'original',
+  );
+  disconnected();
+  await vi.advanceTimersByTimeAsync(150);
+  receive({ ...mode(), targetLang: 'en' });
+  expect(clear).toHaveBeenCalledOnce();
+  expect(document.querySelector('lp-t')).toBeNull();
+  clear.mockRestore();
+});
+
+test('provider revision changes keep rendered nodes and refresh lookup', async () => {
+  dispose = startPagePipeline();
+  receive(mode());
+  await nextScan();
+  const generation = messages.at(-1)!.generation;
+  receive({
+    type: 'cached',
+    keys: ['Source paragraph'],
+    entries: [{ key: 'Source paragraph', text: '번역문' }],
+    generation,
+  });
+  const node = document.querySelector('lp-t');
+  const clear = vi.spyOn(SegmentRenderer.prototype, 'clear');
+  messages = [];
+  receive(mode(true, 1));
+  expect(clear).not.toHaveBeenCalled();
+  expect(document.querySelector('lp-t')).toBe(node);
+  expect(messages).toContainEqual({
+    type: 'lookup',
+    keys: ['Source paragraph'],
+    generation,
+  });
+  clear.mockRestore();
 });

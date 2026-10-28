@@ -11,6 +11,7 @@ import { createPageService } from '../messaging/service';
 import { createUiApi } from '../messaging/api';
 
 export default defineBackground(() => {
+  const e2ePorts = new Set<ReturnType<typeof browser.runtime.connect>>();
   const ready =
     import.meta.env.MODE === 'e2e'
       ? import('../testing/e2e-settings').then(({ bootstrapE2E }) =>
@@ -46,6 +47,21 @@ export default defineBackground(() => {
   const uiApi = createUiApi(getService);
   browser.runtime.onMessage.addListener((message: unknown, sender) => {
     if (
+      import.meta.env.MODE === 'e2e' &&
+      typeof message === 'object' &&
+      message !== null &&
+      'scope' in message &&
+      message.scope === 'lp-e2e-ports'
+    ) {
+      const count = e2ePorts.size;
+      if ('disconnect' in message && message.disconnect === true) {
+        const ports = [...e2ePorts];
+        e2ePorts.clear();
+        for (const port of ports) port.disconnect();
+      }
+      return Promise.resolve({ count });
+    }
+    if (
       typeof message === 'object' &&
       message !== null &&
       'scope' in message &&
@@ -62,9 +78,11 @@ export default defineBackground(() => {
   });
   browser.runtime.onConnect.addListener((port) => {
     if (port.name !== 'lp-page') return;
+    if (import.meta.env.MODE === 'e2e') e2ePorts.add(port);
     let disconnected = false;
     port.onDisconnect.addListener(() => {
       disconnected = true;
+      if (import.meta.env.MODE === 'e2e') e2ePorts.delete(port);
     });
     void getService()
       .then((current) => {

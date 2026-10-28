@@ -315,13 +315,12 @@ export function startPagePipeline() {
   const receive = (message: BackgroundMessage) => {
     if (message.type === 'mode') {
       const wasEnabled = enabled;
+      const firstMode = lastAuto === undefined;
       const fixedChanged = skipFixedBars !== message.skipFixedBars;
+      const revisionChanged = message.revision !== lastRevision;
       skipFixedBars = message.skipFixedBars;
       configured = message.configured;
-      const changed =
-        !connected ||
-        message.targetLang !== targetLang ||
-        message.revision !== lastRevision;
+      const changed = message.targetLang !== targetLang;
       if (lastAuto === undefined || lastAuto !== message.autoEnabled)
         enabled = message.autoEnabled;
       lastAuto = message.autoEnabled;
@@ -333,9 +332,24 @@ export function startPagePipeline() {
       );
       const wasConnected = connected;
       connected = true;
-      if (changed || fixedChanged || !wasConnected || enabled !== wasEnabled)
+      if (firstMode || changed || enabled !== wasEnabled)
         reset(wasEnabled && !enabled);
-      else if (!enabled) clear();
+      else if (!wasConnected || revisionChanged) {
+        for (const key of requested) everRequested.delete(key);
+        requested.clear();
+        if (!wasConnected) post({ type: 'reset' });
+        if (enabled) {
+          const keys = [...new Set(records.map((record) => record.key))];
+          post({ type: 'page', pageId: pageId(), keys });
+          post({ type: 'lookup', keys });
+          report();
+          scheduleScan(0);
+        } else void inspect().catch(() => {});
+      }
+      if (fixedChanged && !firstMode && !changed && enabled === wasEnabled) {
+        if (enabled) scheduleScan(0);
+        else void inspect().catch(() => {});
+      }
       return;
     }
     if (message.generation !== generation) return;
@@ -387,19 +401,24 @@ export function startPagePipeline() {
       clearTimeout(reconnectTimer);
       reconnectTimer = undefined;
     }
-    port?.disconnect();
+    const previous = port;
     port = undefined;
     connected = false;
+    previous?.disconnect();
     connect();
   };
   const connect = () => {
     if (disposed || !started) return;
     try {
-      port = browser.runtime.connect({ name: 'lp-page' });
-      port.onMessage.addListener(receive);
-      port.onDisconnect.addListener(() => {
+      const current = browser.runtime.connect({ name: 'lp-page' });
+      port = current;
+      current.onMessage.addListener((message) => {
+        if (port === current) receive(message);
+      });
+      current.onDisconnect.addListener(() => {
+        if (port !== current) return;
+        port = undefined;
         connected = false;
-        requested.clear();
         if (!disposed && started) reconnectTimer = setTimeout(connect, 100);
       });
     } catch {
