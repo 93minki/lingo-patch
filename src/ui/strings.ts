@@ -16,7 +16,7 @@ export const strings = {
     checking: '확인 중…',
     unavailable: '이 페이지는 번역할 수 없습니다',
     needPageAccess:
-      'Firefox에서는 이 사이트에 접근할 수 있도록 허용해야 번역이 동작합니다.',
+      '이 확장이 이 사이트에 접근할 권한이 없습니다. 허용하면 번역할 수 있습니다.',
     allowThisSite: '이 사이트 접근 허용',
     allowAllSites: '모든 사이트 허용',
     configure: '번역 설정하기',
