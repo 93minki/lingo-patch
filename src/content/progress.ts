@@ -26,15 +26,15 @@ const PROGRESS_CSS = `
   box-sizing: border-box;
   display: none;
   align-items: center;
-  gap: 0.35em;
-  max-width: min(92vw, 28rem);
-  padding: 0.35rem 0.75rem;
+  gap: 6px;
+  max-width: min(92vw, 480px);
+  padding: 8px 18px;
   border-radius: 999px;
   border: 1px solid rgba(0, 0, 0, 0.08);
   background: rgba(255, 255, 255, 0.88);
   color: rgba(0, 0, 0, 0.86);
   font:
-    12px/1.35 system-ui,
+    500 14px/1.4 system-ui,
     -apple-system,
     'Segoe UI',
     sans-serif;
