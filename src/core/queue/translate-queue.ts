@@ -17,6 +17,7 @@ export interface QueueOptions {
   concurrency?: number;
   maxAttempts?: number;
   maxMissingRetries?: number;
+  maxRequestsPerMinute?: number;
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
 }
@@ -34,13 +35,18 @@ interface Batch {
   jobs: Job[];
   controller: AbortController;
 }
+
+const RATE_WINDOW_MS = 60_000;
+
 export class TranslateQueue {
-  private opts: Required<QueueOptions>;
+  private opts: Required<Omit<QueueOptions, 'maxRequestsPerMinute'>> &
+    Pick<QueueOptions, 'maxRequestsPerMinute'>;
   private jobs = new Map<string, Job>();
   private pending: Job[] = [];
   private running = new Set<Batch>();
   private order = 0;
   private timer?: ReturnType<typeof setTimeout>;
+  private rateTimestamps: number[] = [];
   constructor(opts: QueueOptions) {
     this.opts = {
       maxBatchItems: 40,
@@ -69,6 +75,13 @@ export class TranslateQueue {
       this.opts.debounceMs < 0
     )
       throw new RangeError('Invalid retry or debounce limit');
+    if (this.opts.maxRequestsPerMinute !== undefined) {
+      if (
+        !Number.isInteger(this.opts.maxRequestsPerMinute) ||
+        this.opts.maxRequestsPerMinute < 1
+      )
+        throw new RangeError('Invalid maxRequestsPerMinute');
+    }
   }
   enqueue(item: QueueItem): Promise<string> {
     const existing = this.jobs.get(item.key);
@@ -159,6 +172,42 @@ export class TranslateQueue {
       });
     }
   }
+  private pruneRateWindow(now: number): void {
+    const cutoff = now - RATE_WINDOW_MS;
+    this.rateTimestamps = this.rateTimestamps.filter((stamp) => stamp > cutoff);
+  }
+  private waitRateLimit(ms: number, signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return Promise.reject(new ProviderError('aborted'));
+    return new Promise((resolve, reject) => {
+      const delay = Math.max(1, ms);
+      const timer = setTimeout(() => {
+        signal.removeEventListener('abort', onAbort);
+        resolve();
+      }, delay);
+      const onAbort = () => {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', onAbort);
+        reject(new ProviderError('aborted'));
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      if (signal.aborted) onAbort();
+    });
+  }
+  private async acquireRateSlot(signal: AbortSignal): Promise<void> {
+    const limit = this.opts.maxRequestsPerMinute;
+    if (limit === undefined) return;
+    while (true) {
+      if (signal.aborted) throw new ProviderError('aborted');
+      const now = Date.now();
+      this.pruneRateWindow(now);
+      if (this.rateTimestamps.length < limit) {
+        this.rateTimestamps.push(now);
+        return;
+      }
+      const waitMs = this.rateTimestamps[0]! + RATE_WINDOW_MS - now;
+      await this.waitRateLimit(waitMs, signal);
+    }
+  }
   private async abortable<T>(
     work: Promise<T>,
     signal: AbortSignal,
@@ -185,6 +234,8 @@ export class TranslateQueue {
       let result: TranslateItem[] = [];
       for (let attempt = 1; attempt <= this.opts.maxAttempts; attempt++) {
         try {
+          if (signal.aborted) throw new ProviderError('aborted');
+          await this.acquireRateSlot(signal);
           if (signal.aborted) throw new ProviderError('aborted');
           result = await this.abortable(
             this.opts.translate(items, signal),

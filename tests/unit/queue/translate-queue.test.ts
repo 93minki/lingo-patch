@@ -268,12 +268,132 @@ test('can cancel during backoff without issuing another API request', async () =
   await tick(10000);
   expect(translate).toHaveBeenCalledOnce();
 });
+test('does not apply RPM limits when maxRequestsPerMinute is omitted', async () => {
+  const translate = vi.fn(echo);
+  const queue = new TranslateQueue({
+    translate,
+    debounceMs: 0,
+    concurrency: 5,
+    maxBatchItems: 1,
+  });
+  const results = ['a', 'b', 'c', 'd'].map((key) => queue.enqueue(item(key)));
+  await tick(0);
+  expect(translate).toHaveBeenCalledTimes(4);
+  await Promise.all(results);
+});
+
+test('waits for RPM slots across a 60 second sliding window', async () => {
+  const translate = vi.fn(echo);
+  const queue = new TranslateQueue({
+    translate,
+    maxRequestsPerMinute: 2,
+    maxBatchItems: 1,
+    concurrency: 3,
+    debounceMs: 0,
+  });
+  const results = ['a', 'b', 'c'].map((key) => queue.enqueue(item(key)));
+  await tick(0);
+  expect(translate).toHaveBeenCalledTimes(2);
+  await tick(59_999);
+  expect(translate).toHaveBeenCalledTimes(2);
+  await tick(1);
+  await Promise.all(results);
+  expect(translate).toHaveBeenCalledTimes(3);
+});
+
+test('does not overbook RPM slots for concurrent batches', async () => {
+  const translate = vi.fn(echo);
+  const queue = new TranslateQueue({
+    translate,
+    maxRequestsPerMinute: 2,
+    maxBatchItems: 1,
+    concurrency: 2,
+    debounceMs: 0,
+  });
+  const promises = ['a', 'b', 'c'].map((key) => queue.enqueue(item(key)));
+  await tick(0);
+  expect(translate).toHaveBeenCalledTimes(2);
+  queue.cancelTab(1);
+  await Promise.allSettled(promises);
+});
+
+test('counts each retried translate attempt against RPM', async () => {
+  const translate = vi
+    .fn(echo)
+    .mockRejectedValueOnce(new ProviderError('server'))
+    .mockResolvedValueOnce([{ id: '0', text: 'ok' }]);
+  const queue = new TranslateQueue({
+    translate,
+    maxRequestsPerMinute: 1,
+    debounceMs: 0,
+    random: () => 0.5,
+  });
+  const result = queue.enqueue(item('retry'));
+  await tick(0);
+  expect(translate).toHaveBeenCalledTimes(1);
+  await tick(59_999);
+  expect(translate).toHaveBeenCalledTimes(1);
+  await tick(1);
+  expect(translate).toHaveBeenCalledTimes(2);
+  await expect(result).resolves.toBe('ok');
+});
+
+test('cancels an RPM wait for one tab without blocking another tab after the window', async () => {
+  const translate = vi.fn((items: TranslateItem[]) => {
+    if (items[0]?.text === 'hold')
+      return new Promise<TranslateItem[]>(() => {});
+    return echo(items);
+  });
+  const queue = new TranslateQueue({
+    translate,
+    maxRequestsPerMinute: 1,
+    maxBatchItems: 1,
+    concurrency: 2,
+    debounceMs: 0,
+  });
+  queue.enqueue(item('hold', 0, 1));
+  await tick(0);
+  expect(translate).toHaveBeenCalledTimes(1);
+  const blocked = queue.enqueue(item('blocked', 0, 2));
+  await tick(0);
+  expect(translate).toHaveBeenCalledTimes(1);
+  queue.cancelTab(2);
+  await expect(blocked).rejects.toMatchObject({ kind: 'aborted' });
+  const fresh = queue.enqueue(item('fresh', 0, 2));
+  await tick(59_999);
+  expect(translate).toHaveBeenCalledTimes(1);
+  await tick(1);
+  await expect(fresh).resolves.toBe('translated:fresh');
+  expect(translate).toHaveBeenCalledTimes(2);
+});
+
+test('aborts while waiting for an RPM slot without extra translate calls', async () => {
+  const translate = vi.fn(() => new Promise<TranslateItem[]>(() => {}));
+  const queue = new TranslateQueue({
+    translate,
+    maxRequestsPerMinute: 1,
+    maxBatchItems: 1,
+    concurrency: 2,
+    debounceMs: 0,
+  });
+  const hold = queue.enqueue(item('hold'));
+  await tick(0);
+  const waiting = expect(queue.enqueue(item('queued'))).rejects.toMatchObject({
+    kind: 'aborted',
+  });
+  queue.cancelTab(1);
+  await Promise.allSettled([hold, waiting]);
+  await tick(120_000);
+  expect(translate).toHaveBeenCalledTimes(1);
+});
+
 test.each([
   { concurrency: 0 },
   { maxAttempts: 0 },
   { maxBatchTokens: 0 },
   { maxMissingRetries: -1 },
   { debounceMs: NaN },
+  { maxRequestsPerMinute: 0 },
 ])('rejects invalid queue config %o', (options) => {
   expect(
     () => new TranslateQueue({ translate: echo, ...options } as QueueOptions),
