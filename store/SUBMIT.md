@@ -67,8 +67,8 @@ OpenAI, Anthropic Claude, Google Gemini(무료 키 가능), DeepSeek, Groq, Open
 ### 추가 입력란
 
 [공식 URL]: 없음 (그대로)
-[홈페이지 URL]: 비워 둠 (저장소가 비공개라 넣을 공개 주소가 없음)
-[지원 URL]: 비워 둠
+[홈페이지 URL]: https://github.com/93minki/lingo-patch
+[지원 URL]: https://github.com/93minki/lingo-patch/issues
 [성인용 콘텐츠]: 끔 (그대로)
 
 맨 위 또는 아래 **"초안 저장"** 클릭.
