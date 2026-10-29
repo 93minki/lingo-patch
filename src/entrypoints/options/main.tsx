@@ -1,4 +1,12 @@
 import { render } from 'preact';
+import {
+  addUsage,
+  emptyUsage,
+  filterUsage,
+  totalUsage,
+  type UsageData,
+  type UsageCounts,
+} from '../../core/usage';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { browser } from 'wxt/browser';
 import {
@@ -90,6 +98,7 @@ export const OPTIONS_SECTION_IDS = [
   'glossary',
   'sites',
   'cache',
+  'usage',
   'shortcuts',
 ] as const;
 
@@ -121,6 +130,7 @@ const OPTIONS_TOC: { id: OptionsSectionId; label: string }[] = [
   { id: 'glossary', label: '용어집' },
   { id: 'sites', label: strings.options.autoSites },
   { id: 'cache', label: strings.options.cache },
+  { id: 'usage', label: strings.options.usage },
   { id: 'shortcuts', label: strings.options.shortcuts },
 ];
 
@@ -146,6 +156,7 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
   const [siteDraft, setSiteDraft] = useState('');
   const [deleteOrigin, setDeleteOrigin] = useState('');
   const [usage, setUsage] = useState<{ count: number; bytes: number }>();
+  const [tokenUsage, setTokenUsage] = useState<UsageData>({});
   const [commands, setCommands] = useState<
     { name?: string; shortcut?: string }[]
   >([]);
@@ -170,13 +181,16 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
       deps.getSettings(),
       deps.uiRequest({ type: 'cacheUsage' }),
       deps.getCommands(),
+      deps.uiRequest({ type: 'getUsage' }),
     ])
-      .then(([next, usageResponse, commandList]) => {
+      .then(([next, usageResponse, commandList, tokenResponse]) => {
         if (!alive) return;
         setSettings(next);
         if (usageResponse.ok && usageResponse.usage)
           setUsage(usageResponse.usage);
         setCommands(commandList);
+        if (tokenResponse.ok && tokenResponse.tokenUsage)
+          setTokenUsage(tokenResponse.tokenUsage);
       })
       .catch(() => {
         if (!alive) return;
@@ -543,6 +557,19 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
         </button>
       </section>
 
+      <UsageSection
+        data={tokenUsage}
+        onClear={async () => {
+          if (!deps.confirm(strings.options.usageClearConfirm)) return;
+          try {
+            const response = await deps.uiRequest({ type: 'clearUsage' });
+            if (!response.ok) throw new Error('failed');
+            setTokenUsage({});
+          } catch {
+            setError(strings.options.requestFailed);
+          }
+        }}
+      />
       <section aria-label={strings.options.advanced}>
         <h2>{strings.options.advanced}</h2>
         <label class="options__row" for="lp-skip-fixed-bars">
@@ -629,6 +656,79 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
         <a href={SHORTCUTS_HELP_URL}>{strings.options.shortcutsPage}</a>
       </section>
     </main>
+  );
+}
+
+function UsageSection({
+  data,
+  onClear,
+}: {
+  data: UsageData;
+  onClear: () => Promise<void>;
+}) {
+  const now = new Date();
+  const recent = filterUsage(data, now, 30);
+  const rows = new Map<
+    string,
+    { provider: string; model: string; counts: UsageCounts }
+  >();
+  for (const providers of Object.values(recent))
+    for (const [provider, models] of Object.entries(providers))
+      for (const [model, counts] of Object.entries(models)) {
+        const key = JSON.stringify([provider, model]);
+        rows.set(key, {
+          provider,
+          model,
+          counts: addUsage(rows.get(key)?.counts ?? emptyUsage(), counts),
+        });
+      }
+  const labels = strings.options;
+  return (
+    <section id="usage" aria-label={labels.usage}>
+      <h2>{labels.usage}</h2>
+      <p>{labels.usageNotice}</p>
+      {[
+        [labels.usageToday, 1],
+        [labels.usage7, 7],
+        [labels.usage30, 30],
+      ].map(([label, days]) => {
+        const counts = totalUsage(filterUsage(data, now, Number(days)));
+        return (
+          <p>
+            {label}: {labels.usageRequests} {counts.requests} ·{' '}
+            {labels.usageInput} {counts.inputTokens} · {labels.usageOutput}{' '}
+            {counts.outputTokens}
+          </p>
+        );
+      })}
+      <div class="options__usage-table">
+        <table>
+          <thead>
+            <tr>
+              <th>{labels.usageProvider}</th>
+              <th>{labels.usageModel}</th>
+              <th>{labels.usageRequests}</th>
+              <th>{labels.usageInput}</th>
+              <th>{labels.usageOutput}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...rows.values()].map(({ provider, model, counts }) => (
+              <tr>
+                <td>{provider}</td>
+                <td>{model}</td>
+                <td>{counts.requests}</td>
+                <td>{counts.inputTokens}</td>
+                <td>{counts.outputTokens}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <button type="button" class="options__btn" onClick={() => void onClear()}>
+        {labels.usageClear}
+      </button>
+    </section>
   );
 }
 

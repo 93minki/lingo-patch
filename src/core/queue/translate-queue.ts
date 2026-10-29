@@ -11,6 +11,7 @@ export interface QueueOptions {
     items: TranslateItem[],
     signal: AbortSignal,
     keys: string[],
+    tabs: number[],
   ) => Promise<TranslateItem[]>;
   groupKey?: (item: QueueItem) => string;
   maxBatchItems?: number;
@@ -296,6 +297,7 @@ export class TranslateQueue {
               payload,
               signal,
               sentJobs.map((job) => job.item.key),
+              [...new Set(sentJobs.flatMap((job) => [...job.tabs]))],
             ),
             signal,
           );

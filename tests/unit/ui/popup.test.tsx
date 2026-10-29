@@ -727,3 +727,14 @@ test('hides page access prompt when permission already granted', async () => {
   expect(root.textContent).not.toContain(strings.popup.allowThisSite);
   expect(root.textContent).toContain(strings.popup.autoSite);
 });
+
+test('shows abbreviated page token usage', async () => {
+  const { root } = mount(async () => ({
+    ok: true,
+    status: status({
+      pageUsage: { requests: 1, inputTokens: 12300, outputTokens: 8100 },
+    }),
+  }));
+  await waitReady(root);
+  expect(root.textContent).toContain('이 페이지 토큰: 입력 12.3k · 출력 8.1k');
+});

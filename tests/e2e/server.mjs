@@ -61,6 +61,7 @@ const server = createServer(async (req, res) => {
       await delay(delayMs);
       completed++;
       return json({
+        usage: { prompt_tokens: 123, completion_tokens: 45 },
         choices: [
           {
             message: {

@@ -1,6 +1,7 @@
 import { browser } from 'wxt/browser';
 import type { ProviderConfig, ProviderError } from '../providers/types';
 import type { DisplayMode } from './types';
+import type { UsageCounts, UsageData } from '../core/usage';
 import type { CacheTransferEntry } from '../storage/cache-db';
 
 export interface TabStatus {
@@ -15,6 +16,7 @@ export interface TabStatus {
   restored: number;
   translated: number;
   pending: number;
+  pageUsage?: UsageCounts;
   error?: ProviderError['kind'] | 'unconfigured';
 }
 export type UiRequest =
@@ -22,6 +24,8 @@ export type UiRequest =
   | { type: 'toggleTab'; tabId: number }
   | { type: 'retranslatePage'; tabId: number }
   | { type: 'validateProvider'; cfg: ProviderConfig }
+  | { type: 'getUsage' }
+  | { type: 'clearUsage' }
   | { type: 'cacheUsage' }
   | { type: 'clearCache' }
   | { type: 'deleteSiteCache'; origin: string }
@@ -41,6 +45,7 @@ export interface UiResponse {
   error?: ProviderError['kind'] | 'permission' | 'unavailable';
   status?: TabStatus;
   models?: string[];
+  tokenUsage?: UsageData;
   usage?: { count: number; bytes: number };
   entries?: CacheTransferEntry[];
   importResult?: { imported: number; skipped: number; kept: number };

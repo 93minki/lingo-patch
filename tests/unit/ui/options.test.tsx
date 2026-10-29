@@ -962,3 +962,38 @@ test('hides API access button when provider permission is granted', async () => 
   );
   expect(root.textContent).not.toContain(strings.options.allowApiAccess);
 });
+
+test('renders usage totals and clears records after confirmation', async () => {
+  const date = new Date();
+  const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  const request: OptionsDeps['uiRequest'] = vi.fn(async (message) =>
+    message.type === 'getUsage'
+      ? {
+          ok: true,
+          tokenUsage: {
+            [day]: {
+              openai: {
+                model: { requests: 2, inputTokens: 123, outputTokens: 45 },
+              },
+            },
+          },
+        }
+      : { ok: true },
+  );
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  render(<OptionsApp deps={deps({ uiRequest: request })} />, root);
+  await vi.waitFor(() =>
+    expect(root.querySelector('#usage')?.textContent).toContain(
+      '오늘: 요청 2 · 입력 123 · 출력 45',
+    ),
+  );
+  expect(root.querySelector('#usage table')?.textContent).toContain('openai');
+  [...root.querySelectorAll('button')]
+    .find((button) => button.textContent === strings.options.usageClear)
+    ?.click();
+  await vi.waitFor(() =>
+    expect(root.querySelector('#usage')?.textContent).toContain('오늘: 요청 0'),
+  );
+  expect(request).toHaveBeenCalledWith({ type: 'clearUsage' });
+});

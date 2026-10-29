@@ -1,3 +1,4 @@
+import { formatTokens } from '../../core/usage';
 import { render } from 'preact';
 import { useCallback, useEffect, useState } from 'preact/hooks';
 import { browser } from 'wxt/browser';
@@ -584,6 +585,14 @@ export function PopupApp({ deps }: { deps: PopupDeps }) {
           <span class="popup__stat-label">{strings.popup.statsPending}</span>
         </div>
       </section>
+      <p>
+        {status.pageUsage?.requests
+          ? strings.popup.pageTokens(
+              formatTokens(status.pageUsage.inputTokens),
+              formatTokens(status.pageUsage.outputTokens),
+            )
+          : strings.popup.pageNoRequests}
+      </p>
       <PopupSettingsLink busy={busy} onOpen={openSettings} />
     </main>
   );

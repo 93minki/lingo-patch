@@ -9,7 +9,15 @@ import { PROMPT_VERSION } from '../../../src/core/prompt/version';
 import type { BackgroundMessage } from '../../../src/messaging/types';
 import type { Settings } from '../../../src/storage/settings';
 import type { TranslateRequest } from '../../../src/providers/types';
-const mock = vi.hoisted(() => ({ translate: vi.fn() }));
+const mock = vi.hoisted(() => ({
+  translate: vi.fn(),
+  saveUsage: vi.fn(async () => {}),
+}));
+vi.mock('../../../src/storage/usage', () => ({
+  saveUsage: mock.saveUsage,
+  getUsage: vi.fn(),
+  clearUsage: vi.fn(),
+}));
 vi.mock('../../../src/providers', async (original) => ({
   ...(await original<typeof import('../../../src/providers')>()),
   createProvider: vi.fn(() => ({ translateBatch: mock.translate })),
@@ -362,4 +370,64 @@ test('navigation during retranslation inspection cannot delete or retranslate th
   expect(a.messages.some((message) => message.type === 'retranslate')).toBe(
     false,
   );
+});
+
+test('records provider usage and resets page counters on generation change', async () => {
+  mock.saveUsage.mockClear();
+  mock.translate.mockImplementation(async (req: TranslateRequest) => ({
+    items: req.items,
+    usage: { inputTokens: 123, outputTokens: 45 },
+  }));
+  const p = port(1);
+  service.connect(p.value);
+  const markup = 'Usage sample';
+  const key = await keyFor(markup);
+  p.send({
+    type: 'translate',
+    generation: 0,
+    items: [{ key, markup, priority: 1 }],
+  });
+  await vi.waitFor(() =>
+    expect(mock.saveUsage).toHaveBeenCalledWith(
+      'openai-compatible',
+      'test-model',
+      { requests: 1, inputTokens: 123, outputTokens: 45 },
+    ),
+  );
+  expect(service.status(1)?.pageUsage).toEqual({
+    requests: 1,
+    inputTokens: 123,
+    outputTokens: 45,
+  });
+  p.send({ type: 'reset', generation: 1 });
+  expect(service.status(1)?.pageUsage).toEqual({
+    requests: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+  });
+});
+
+test('records a request without token counts when provider omits usage', async () => {
+  mock.saveUsage.mockClear();
+  const p = port(1);
+  service.connect(p.value);
+  const markup = 'No usage';
+  const key = await keyFor(markup);
+  p.send({
+    type: 'translate',
+    generation: 0,
+    items: [{ key, markup, priority: 1 }],
+  });
+  await vi.waitFor(() =>
+    expect(mock.saveUsage).toHaveBeenCalledWith(
+      'openai-compatible',
+      'test-model',
+      { requests: 1, inputTokens: 0, outputTokens: 0 },
+    ),
+  );
+  expect(service.status(1)?.pageUsage).toEqual({
+    requests: 1,
+    inputTokens: 0,
+    outputTokens: 0,
+  });
 });

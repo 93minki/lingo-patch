@@ -182,6 +182,14 @@ export function createUiApi(getService: () => Promise<Service>) {
           ),
         };
       }
+      if (request.type === 'getUsage' || request.type === 'clearUsage') {
+        if (!optionsPage) return { ok: false, error: 'permission' };
+        if (request.type === 'clearUsage') {
+          await service.clearUsage();
+          return { ok: true };
+        }
+        return { ok: true, tokenUsage: await service.getUsage() };
+      }
       if (request.type === 'cacheUsage')
         return { ok: true, usage: await service.cacheUsage() };
       if (request.type === 'clearCache' || request.type === 'deleteSiteCache') {

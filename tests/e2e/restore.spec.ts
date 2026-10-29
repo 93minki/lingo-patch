@@ -218,6 +218,12 @@ test('persistent paragraph cache, original DOM, lazy requests and keyboard modes
     await extensionPage.goto(
       `${worker.url().split('/').slice(0, 3).join('/')}/options.html`,
     );
+    await expect(extensionPage.locator('#usage')).toContainText(
+      /입력 [1-9]\d*/,
+    );
+    await expect(extensionPage.locator('#usage')).toContainText(
+      /출력 [1-9]\d*/,
+    );
     const disconnectedPorts = await extensionPage.evaluate(() =>
       chrome.runtime.sendMessage({ scope: 'lp-e2e-ports', disconnect: true }),
     );

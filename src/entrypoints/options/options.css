@@ -351,3 +351,19 @@ body {
   min-width: 0;
   margin-bottom: 0;
 }
+
+.options__usage-table {
+  overflow-x: auto;
+  margin-bottom: 12px;
+}
+.options__usage-table table {
+  border-collapse: collapse;
+  width: 100%;
+  text-align: left;
+}
+.options__usage-table th,
+.options__usage-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--lp-border);
+  overflow-wrap: anywhere;
+}

@@ -22,6 +22,8 @@ import {
   type PageMessage,
 } from './types';
 import { PRESETS } from '../providers/presets';
+import { addUsage, emptyUsage, type UsageCounts } from '../core/usage';
+import { saveUsage, getUsage, clearUsage } from '../storage/usage';
 
 interface Connection {
   port: Browser.runtime.Port;
@@ -30,6 +32,7 @@ interface Connection {
   origin: string;
   hostname: string;
   keys: string[];
+  usage: UsageCounts;
   inspected?: () => void;
   inspection?: Promise<void>;
   stats: Pick<
@@ -82,6 +85,7 @@ export function createPageService(
     });
   const status = (connection: Connection): TabStatus => ({
     ...connection.stats,
+    pageUsage: connection.usage,
     available: true,
     configured: Boolean(providerConfig),
     hostname: connection.hostname,
@@ -102,18 +106,39 @@ export function createPageService(
     queue = new TranslateQueue({
       ...(preset?.rpm ? { maxRequestsPerMinute: preset.rpm } : {}),
       groupKey: (item) => JSON.stringify(batchGlossaries.get(item.key) ?? []),
-      translate: async (items, signal, keys) => {
-        if (!selected)
+      translate: async (items, signal, keys, tabs) => {
+        if (!selected || !cfg)
           throw new ProviderError('bad_request', 'Configure a provider first');
-        return (
-          await selected.translateBatch({
-            items,
-            signal,
-            targetLang,
-            glossary: batchGlossaries.get(keys[0]!) ?? [],
-            context: sourceContexts.get(items[0]?.text ?? ''),
-          })
-        ).items;
+        const owners = tabs.map((tabId) => {
+          const connection = connections.get(tabId);
+          return { connection, generation: connection?.generation };
+        });
+        const result = await selected.translateBatch({
+          items,
+          signal,
+          targetLang,
+          glossary: batchGlossaries.get(keys[0]!) ?? [],
+          context: sourceContexts.get(items[0]?.text ?? ''),
+        });
+        const counts = {
+          requests: 1,
+          inputTokens: result.usage?.inputTokens ?? 0,
+          outputTokens: result.usage?.outputTokens ?? 0,
+        };
+        for (const { connection, generation } of owners) {
+          if (
+            connection &&
+            connections.get(connection.tabId) === connection &&
+            connection.generation === generation
+          ) {
+            connection.usage = addUsage(connection.usage, counts);
+            onStatus?.(connection.tabId, status(connection));
+          }
+        }
+        void saveUsage(cfg.provider, cfg.model, counts).catch(() =>
+          console.error('Unable to save usage'),
+        );
+        return result.items;
       },
     });
   };
@@ -140,6 +165,8 @@ export function createPageService(
     if (message.type === 'openOptions') return;
     if (message.type === 'reset') {
       if (message.generation < connection.generation) return;
+      if (message.generation > connection.generation)
+        connection.usage = emptyUsage();
       connection.generation = message.generation;
       queue.cancelTab(connection.tabId, message.stop === true);
       connection.stats = {
@@ -303,6 +330,7 @@ export function createPageService(
         origin: address.origin,
         hostname: address.hostname,
         keys: [],
+        usage: emptyUsage(),
         stats: {
           enabled: false,
           total: 0,
@@ -393,6 +421,8 @@ export function createPageService(
       if (!current()) throw new ProviderError('aborted');
       send(connection, { type: 'retranslate' });
     },
+    getUsage,
+    clearUsage,
     cacheUsage: () => db.usage(),
     cacheExportBatch: (after?: string) => db.exportBatch(after),
     async cacheImportBatch(
