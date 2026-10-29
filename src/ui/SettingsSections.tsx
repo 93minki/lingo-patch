@@ -438,7 +438,11 @@ export function SettingsSections({
     nextPreset = presetId,
     nextBaseUrl = baseUrl,
   ) => {
-    const permissionUrl = permissionBaseUrl(nextEngine, nextPreset, nextBaseUrl);
+    const permissionUrl = permissionBaseUrl(
+      nextEngine,
+      nextPreset,
+      nextBaseUrl,
+    );
     if (permissionUrl === undefined) {
       setApiAccessGranted(true);
       return;
@@ -747,10 +751,12 @@ export function SettingsSections({
           <>
             <label for={apiKeyId}>{strings.options.apiKey}</label>
             <div class={rowClass}>
-              {showKey ? (
+              <div class="lp-settings-key-input">
                 <input
                   id={apiKeyId}
-                  type="text"
+                  {...(showKey
+                    ? { type: 'text' as const }
+                    : { type: 'password' as const })}
                   value={apiKey}
                   autoComplete="off"
                   disabled={busy}
@@ -763,33 +769,40 @@ export function SettingsSections({
                     setApiKey(keyDraft.current);
                   }}
                 />
-              ) : (
-                <input
-                  id={apiKeyId}
-                  type="password"
-                  value={apiKey}
-                  autoComplete="off"
+                <button
+                  type="button"
+                  class="lp-settings-key-toggle"
                   disabled={busy}
-                  onInput={(event) => {
-                    keyDirty.current = true;
-                    keyLoadVersion.current++;
-                    keyDraft.current = (
-                      event.currentTarget as HTMLInputElement
-                    ).value;
-                    setApiKey(keyDraft.current);
-                  }}
-                />
-              )}
+                  aria-label={
+                    showKey ? strings.options.hideKey : strings.options.showKey
+                  }
+                  aria-pressed={showKey}
+                  onClick={() => setShowKey((value) => !value)}
+                >
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+                    <circle cx="12" cy="12" r="3" />
+                    {!showKey ? <path d="M3 3l18 18" /> : null}
+                  </svg>
+                </button>
+              </div>
               <button
                 type="button"
                 class={btnClass}
                 disabled={busy}
-                aria-label={
-                  showKey ? strings.options.hideKey : strings.options.showKey
-                }
-                onClick={() => setShowKey((value) => !value)}
+                onClick={() => void validateKey()}
               >
-                {showKey ? strings.options.hideKey : strings.options.showKey}
+                {busy
+                  ? strings.options.validating
+                  : strings.options.validateKey}
               </button>
               {storedKeyPresent ? (
                 <button
@@ -854,51 +867,37 @@ export function SettingsSections({
             ) : null}
 
             <label for={modelId}>{strings.options.model}</label>
-            {engine === 'custom' ? (
-              <input
-                id={modelId}
-                type="text"
-                value={model}
-                disabled={busy}
-                onInput={(event) =>
-                  setModel((event.currentTarget as HTMLInputElement).value)
-                }
-              />
-            ) : selectChoices.length ? (
-              <select
-                id={modelId}
-                value={model}
-                disabled={busy || !fetchedModels}
-                onChange={(event) =>
-                  setModel((event.currentTarget as HTMLSelectElement).value)
-                }
-              >
-                {selectChoices.map((id) => (
-                  <option value={id}>{formatModelLabel(id)}</option>
-                ))}
-              </select>
-            ) : (
-              <>
+            <div class={`${rowClass} lp-settings-model-row`}>
+              {engine === 'custom' ? (
+                <input
+                  id={modelId}
+                  type="text"
+                  value={model}
+                  disabled={busy}
+                  onInput={(event) =>
+                    setModel((event.currentTarget as HTMLInputElement).value)
+                  }
+                />
+              ) : selectChoices.length ? (
+                <select
+                  id={modelId}
+                  value={model}
+                  disabled={busy || !fetchedModels}
+                  onChange={(event) =>
+                    setModel((event.currentTarget as HTMLSelectElement).value)
+                  }
+                >
+                  {selectChoices.map((id) => (
+                    <option value={id}>{formatModelLabel(id)}</option>
+                  ))}
+                </select>
+              ) : (
                 <select id={modelId} disabled>
                   <option value="">
                     {strings.options.validateModelsFirst}
                   </option>
                 </select>
-                <p class={noticeClass}>{strings.options.validateModelsFirst}</p>
-              </>
-            )}
-
-            <div class={rowClass}>
-              <button
-                type="button"
-                class={btnClass}
-                disabled={busy}
-                onClick={() => void validateKey()}
-              >
-                {busy
-                  ? strings.options.validating
-                  : strings.options.validateKey}
-              </button>
+              )}
               <button
                 type="button"
                 class={btnPrimaryClass}
@@ -908,6 +907,9 @@ export function SettingsSections({
                 {strings.options.save}
               </button>
             </div>
+            {engine !== 'custom' && !selectChoices.length ? (
+              <p class={noticeClass}>{strings.options.validateModelsFirst}</p>
+            ) : null}
             <p class={noticeClass}>{strings.options.privacy}</p>
             {compact ? (
               <p class={noticeClass}>

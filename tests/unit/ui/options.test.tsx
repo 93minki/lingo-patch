@@ -22,6 +22,7 @@ import {
 } from '../../../src/entrypoints/options/main';
 import type { Settings, SettingsPatch } from '../../../src/storage/settings';
 import { strings } from '../../../src/ui/strings';
+import { clearApiKey, setApiKey } from '../../../src/storage/secrets';
 
 const storageMocks = vi.hoisted(() => ({
   localData: {} as Record<string, unknown>,
@@ -245,13 +246,19 @@ test('buildProviderConfig uses the list-models probe without a selected model', 
 });
 
 test('shows onboarding when provider is missing', () => {
-  expect(showsOnboarding(null)).toBe(true);
+  expect(showsOnboarding(null, undefined)).toBe(true);
   expect(
-    showsOnboarding({
-      provider: 'openai',
-      model: 'm',
-    }),
+    showsOnboarding(
+      {
+        provider: 'openai',
+        model: 'm',
+      },
+      'saved',
+    ),
   ).toBe(false);
+  expect(showsOnboarding({ provider: 'openai', model: 'm' }, undefined)).toBe(
+    true,
+  );
 });
 
 test('isEngineModelAllowed accepts listed native models', () => {
@@ -550,6 +557,27 @@ test('renders onboarding for an unconfigured install', async () => {
   expect(root.querySelector(`a[href*="openai.com"]`)).toBeTruthy();
 });
 
+test('updates onboarding when the saved provider key changes', async () => {
+  getSettings.mockResolvedValue({
+    ...DEFAULT_SETTINGS,
+    provider: { provider: 'openai', model: 'm' },
+  });
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  render(<OptionsApp deps={deps()} />, root);
+  await vi.waitFor(() =>
+    expect(root.textContent).toContain(strings.options.onboardingFreeTitle),
+  );
+  await setApiKey('openai', 'saved');
+  await vi.waitFor(() =>
+    expect(root.textContent).not.toContain(strings.options.onboardingFreeTitle),
+  );
+  await clearApiKey('openai');
+  await vi.waitFor(() =>
+    expect(root.textContent).toContain(strings.options.onboardingFreeTitle),
+  );
+});
+
 test('shows load error when bootstrap requests fail', async () => {
   const root = document.createElement('div');
   document.body.appendChild(root);
@@ -621,6 +649,20 @@ test('toggles API key visibility', async () => {
       root.querySelector(`button[aria-label="${strings.options.showKey}"]`),
     ).toBeTruthy(),
   );
+  expect((root.querySelector('#lp-api-key') as HTMLInputElement).type).toBe(
+    'password',
+  );
+  expect(
+    root.querySelector('#lp-api-key')?.closest('.options__row')?.textContent,
+  ).toContain(strings.options.validateKey);
+  expect(
+    root.querySelector('#lp-model')?.closest('.options__row')?.textContent,
+  ).toContain(strings.options.save);
+  expect(
+    root
+      .querySelector(`button[aria-label="${strings.options.showKey}"]`)
+      ?.getAttribute('aria-pressed'),
+  ).toBe('false');
   (
     root.querySelector(
       `button[aria-label="${strings.options.showKey}"]`,
@@ -629,6 +671,16 @@ test('toggles API key visibility', async () => {
   await vi.waitFor(() =>
     expect((root.querySelector('#lp-api-key') as HTMLInputElement).type).toBe(
       'text',
+    ),
+  );
+  const hide = root.querySelector(
+    `button[aria-label="${strings.options.hideKey}"]`,
+  ) as HTMLButtonElement;
+  expect(hide.getAttribute('aria-pressed')).toBe('true');
+  hide.click();
+  await vi.waitFor(() =>
+    expect((root.querySelector('#lp-api-key') as HTMLInputElement).type).toBe(
+      'password',
     ),
   );
 });

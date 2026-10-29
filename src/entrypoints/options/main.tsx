@@ -21,10 +21,11 @@ import {
   clearAllApiKeys,
   clearApiKey,
   getApiKey,
+  onSecretsChanged,
   setApiKey,
 } from '../../storage/secrets';
 import { KEY_LINKS, SHORTCUTS_HELP_URL } from '../../ui/key-links';
-import { SettingsSections } from '../../ui/SettingsSections';
+import { activeSecretId, SettingsSections } from '../../ui/SettingsSections';
 import { GlossaryEditor } from '../../ui/GlossaryEditor';
 import { CacheTransfer } from '../../ui/CacheTransfer';
 import {
@@ -77,8 +78,11 @@ export function filterOptionsCommands(
   );
 }
 
-export function showsOnboarding(provider: Settings['provider']): boolean {
-  return provider === null;
+export function showsOnboarding(
+  provider: Settings['provider'],
+  key: string | undefined,
+): boolean {
+  return provider === null || !key;
 }
 
 export const OPTIONS_SECTION_IDS = [
@@ -151,6 +155,8 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
   const [loadError, setLoadError] = useState<string | undefined>();
   const [retryToken, setRetryToken] = useState(0);
   const [contentReady, setContentReady] = useState(false);
+  // null = 아직 읽는 중 (안내가 잠깐 깜빡이지 않게)
+  const [storedKey, setStoredKey] = useState<string | undefined | null>(null);
 
   const refreshCacheUsage = async () => {
     const response = await deps.uiRequest({ type: 'cacheUsage' });
@@ -185,6 +191,32 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
       stop();
     };
   }, [deps, retryToken]);
+
+  useEffect(() => {
+    const id = settings && activeSecretId(settings);
+    let alive = true;
+    let version = 0;
+    setStoredKey(id ? null : undefined);
+    const refresh = () => {
+      const current = ++version;
+      if (!id) return;
+      void getApiKey(id)
+        .then((key) => {
+          if (alive && current === version) setStoredKey(key);
+        })
+        .catch(() => {
+          if (alive && current === version) setStoredKey(undefined);
+        });
+    };
+    refresh();
+    const stop = onSecretsChanged((ids) => {
+      if (id && ids.includes(id)) refresh();
+    });
+    return () => {
+      alive = false;
+      stop();
+    };
+  }, [settings?.provider?.provider, settings?.preset]);
 
   useEffect(() => {
     if (!settings) {
@@ -267,7 +299,7 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
         </ul>
       </nav>
 
-      {showsOnboarding(settings.provider) ? (
+      {storedKey !== null && showsOnboarding(settings.provider, storedKey) ? (
         <section
           class="options__onboarding"
           aria-label={strings.options.onboardingFreeTitle}

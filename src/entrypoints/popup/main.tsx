@@ -452,7 +452,6 @@ export function PopupApp({ deps }: { deps: PopupDeps }) {
         >
           {strings.popup.configure}
         </button>
-        <PopupSettingsLink busy={busy} onOpen={openSettings} />
       </main>
     );
   }

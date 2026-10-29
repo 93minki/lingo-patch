@@ -214,7 +214,9 @@ async function waitReady(root: HTMLElement) {
 
 async function openPopupSettings(root: HTMLElement) {
   const settings = [...root.querySelectorAll('button')].find(
-    (node) => node.textContent === strings.popup.settings,
+    (node) =>
+      node.textContent === strings.popup.settings ||
+      node.textContent === strings.popup.configure,
   );
   settings?.click();
   await vi.waitFor(() =>
@@ -328,6 +330,11 @@ test('configure opens in-popup settings instead of openOptions', async () => {
   }));
   const { root } = mount(uiRequest);
   await waitReady(root);
+  expect(
+    [...root.querySelectorAll('button')].some(
+      (node) => node.textContent === strings.popup.settings,
+    ),
+  ).toBe(false);
   const configure = [...root.querySelectorAll('button')].find(
     (node) => node.textContent === strings.popup.configure,
   );
@@ -338,7 +345,7 @@ test('configure opens in-popup settings instead of openOptions', async () => {
   expect(uiRequest).not.toHaveBeenCalledWith({ type: 'openOptions' });
 });
 
-test('settings link switches to in-popup settings screen', async () => {
+test('configure switches to in-popup settings screen', async () => {
   const openOptionsPage = vi.fn();
   const uiRequest = vi.fn(async () => ({
     ok: true,
