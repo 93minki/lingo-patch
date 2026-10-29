@@ -49,7 +49,7 @@ OpenAI, Anthropic Claude, Google Gemini(무료 키 가능), DeepSeek, Groq, Open
 ## 데이터 사용 공개 (Privacy practices 탭)
 - 수집 항목: "웹사이트 콘텐츠(Website content)" — 번역을 위해 사용자가 선택한 AI 제공자로 전송. "인증 정보(Authentication information)" — 사용자의 API 키, 로컬 저장 및 해당 제공자 인증에만 사용.
 - 체크할 확인 항목: 승인된 용도 외 제3자 판매·이전 안 함 / 핵심 기능과 무관한 용도로 사용 안 함 / 신용도 판단·대출 용도로 사용 안 함.
-- 개인정보처리방침 URL: `store/PRIVACY.md`를 공개 주소에 올린 뒤 그 URL 입력.
+- 개인정보처리방침 URL: https://gist.github.com/93minki/df418e5123a9c9780f92e1f50d16de84 (store/PRIVACY.md를 고치면 Gist도 같이 갱신)
 
 ## 제출 순서
 1. https://chrome.google.com/webstore/devconsole 에 Google 계정으로 로그인 → 개발자 등록비 $5 결제 (1회)
