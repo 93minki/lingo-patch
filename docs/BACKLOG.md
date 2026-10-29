@@ -12,3 +12,4 @@
 | P7 | Next.js 사이드바처럼 원문 칸이 `flex:1; truncate`면 번역문이 오른쪽 끝에 붙고 원문이 잘림 | 실사용 판단 |
 | P7 | Firefox·Whale 실기 검증 (이 Mac에 미설치), Safari 실기 검증 | 수동 |
 | P7 | `scan-block.ts`의 블록 판정 규칙이 `core/segment`와 중복 정의됨 — 한쪽만 바뀌면 어긋날 수 있음 | 하 |
+| 스토어 | Chrome 웹 스토어가 콘텐츠 스크립트 `<all_urls>`를 "광범위한 호스트 권한"으로 보고 심층 검토(게시 지연). 대안: 기본은 `activeTab` + `scripting` 주입, 자동 번역 사이트 등록 시 해당 사이트만 `optional_host_permissions` 요청 + 동적 콘텐츠 스크립트 등록(`scripting.registerContentScripts`). 재방문 자동 복원·드래그 번역·단축키 동작이 바뀌므로 설계 검토 필요 | 중 |
