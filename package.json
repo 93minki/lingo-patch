@@ -17,7 +17,8 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "postinstall": "wxt prepare",
-    "test:e2e": "wxt build --mode e2e && playwright test"
+    "test:e2e": "wxt build --mode e2e && playwright test",
+    "store:assets": "wxt build --mode e2e && node scripts/store-assets.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -1,8 +1,10 @@
+/* global process, console */
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { Buffer } from 'node:buffer';
 import { URL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+import { article, translations } from './store-fixture.mjs';
 
 let requests = 0,
   items = 0,
@@ -11,6 +13,7 @@ let requests = 0,
   completed = 0;
 const batches = [];
 const glossaryBatches = [];
+const storeMode = process.argv.includes('--store');
 const server = createServer(async (req, res) => {
   const json = (value) => {
     res.writeHead(200, { 'content-type': 'application/json' });
@@ -34,6 +37,10 @@ const server = createServer(async (req, res) => {
     }
     if (req.url === '/v1/models')
       return json({ data: [{ id: 'lingo-patch-e2e-mock' }] });
+    if (storeMode && req.url === '/store') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      return res.end(article);
+    }
     if (req.url === '/pending-a') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       return res.end(
@@ -68,7 +75,9 @@ const server = createServer(async (req, res) => {
               content: JSON.stringify({
                 items: input.items.map((item) => ({
                   id: item.id,
-                  text: `[KO] ${item.text}`,
+                  text: storeMode
+                    ? (translations[item.text] ?? item.text)
+                    : `[KO] ${item.text}`,
                 })),
               }),
             },
@@ -101,4 +110,6 @@ const server = createServer(async (req, res) => {
     res.end('Invalid mock request');
   }
 });
-server.listen(4174, '127.0.0.1');
+server.listen(4174, '127.0.0.1', () => {
+  if (storeMode) console.log('Store mock server ready');
+});
