@@ -2,7 +2,7 @@
   "name": "lingo-patch",
   "description": "AI dual-language web translation browser extension with paragraph cache",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "wxt",
