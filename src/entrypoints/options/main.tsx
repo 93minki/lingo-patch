@@ -653,10 +653,25 @@ export function OptionsApp({ deps }: { deps: OptionsDeps }) {
             <li>{strings.options.noCommands}</li>
           )}
         </ul>
-        <a href={SHORTCUTS_HELP_URL}>{strings.options.shortcutsPage}</a>
+        <a href={SHORTCUTS_HELP_URL} onClick={openShortcutSettings}>
+          {strings.options.shortcutsPage}
+        </a>
       </section>
     </main>
   );
+}
+
+// 페이지에서 chrome:// 링크로 직접 이동하는 것은 브라우저가 막으므로 확장 API로 연다.
+function openShortcutSettings(event: Event) {
+  event.preventDefault();
+  const commands = browser.commands as typeof browser.commands & {
+    openShortcutSettings?: () => Promise<void>;
+  };
+  if (commands.openShortcutSettings) {
+    void commands.openShortcutSettings();
+    return;
+  }
+  void browser.tabs.create({ url: SHORTCUTS_HELP_URL });
 }
 
 function UsageSection({
