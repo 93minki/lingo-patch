@@ -7,7 +7,7 @@
 
 ## 0. 패키지 (왼쪽 메뉴 "패키지")
 
-[업로드할 파일]: `.output/lingo-patch-0.1.0-chrome.zip`
+[업로드할 파일]: `.output/lingo-patch-0.1.1-chrome.zip`
 (없으면 터미널에서 `npm run zip`)
 
 ---
@@ -35,8 +35,8 @@
 • 자동 번역 사이트 등록, 단축키(번역 켜기/끄기, 표시 모드 바꾸기)
 • 번역 캐시 내보내기·가져오기
 
-■ 지원 AI (본인 API 키 사용)
-OpenAI, Anthropic Claude, Google Gemini(무료 키 가능), DeepSeek, Groq, OpenRouter, OpenAI 호환 주소
+■ 번역 엔진
+본인의 AI API 키로 번역합니다. 여러 AI 제공자 중 원하는 곳을 설정에서 고를 수 있고, 무료 키를 발급하는 제공자로도 시작할 수 있습니다.
 
 ■ 시작 방법
 1. 설치 후 확장 아이콘 → 설정
@@ -146,3 +146,7 @@ https://gist.github.com/93minki/df418e5123a9c9780f92e1f50d16de84
 1. `package.json` 버전 올리기 → `npm run zip`
 2. 대시보드 "패키지" → 새 패키지 업로드 → 제출
 3. `store/PRIVACY.md`를 고쳤다면 Gist도 같은 내용으로 갱신
+
+## 거부 기록
+
+- 0.1.0 (2026-10-30): "스팸 및 스토어 내 게재위치 — 불필요한 키워드". 설명에 AI 제공자 이름을 나열한 줄이 걸림. 설명에는 다른 회사·제품 이름을 목록으로 늘어놓지 않는다.
